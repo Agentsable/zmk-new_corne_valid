@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { askPermission, notifyOnChange, permission } from "./notify.js";
 import Deploy from "./Deploy.jsx";
 import Keymap from "./Keymap.jsx";
 import RequestCard from "./Request.jsx";
@@ -16,9 +17,15 @@ const NAV = [
 export default function App() {
   const [page, setPage] = useState("deploy");
   const [req, setReq] = useState(null);
+  const [perm, setPerm] = useState(permission());
+  const prevState = useRef(null);
 
   const refresh = useCallback(() => {
-    fetch("/api/state").then((r) => r.json()).then((j) => setReq(j.request)).catch(() => {});
+    fetch("/api/state").then((r) => r.json()).then((j) => {
+      setReq(j.request);
+      notifyOnChange(prevState.current, j);
+      prevState.current = j;
+    }).catch(() => {});
   }, []);
   useEffect(() => {
     refresh();
@@ -39,6 +46,12 @@ export default function App() {
             </button>
           ))}
         </nav>
+        {perm !== "granted" && perm !== "unsupported" && (
+          <button className="notifybtn"
+            onClick={async () => setPerm(await askPermission())}>
+            {perm === "denied" ? "Notifications blocked" : "Enable notifications"}
+          </button>
+        )}
       </aside>
 
       <main className="content">

@@ -58,6 +58,12 @@ def git(*args, timeout=180):
     return r.returncode == 0, out
 
 
+def remote_has_tag(tag):
+    """A push that exits 0 is not proof the tag landed -- ask the remote."""
+    ok, out = git("ls-remote", "--tags", "origin", f"refs/tags/{tag}", timeout=60)
+    return ok and tag in out
+
+
 def build_halves():
     """Run the same Docker build that produces the flashed firmware."""
     script = ["set -e"]
@@ -301,18 +307,21 @@ def workflow(name):
         return fail("predeploy", f"commit failed: {out.splitlines()[-1] if out else ''}")
     if clean:
         log("predeploy: keymap unchanged, tagging current commit")
-    okt, out = git("tag", "-f", pre)
+    # Annotated, not lightweight: --follow-tags ignores lightweight tags, which
+    # silently left every version tag local-only.
+    okt, out = git("tag", "-f", "-a", pre, "-m", f"Predeploy {ts} {safe}")
     if not okt:
         return fail("predeploy", f"tag failed: {out}")
-    okp, out = git("push", "origin", "main", "--follow-tags", "--force-with-lease")
-    if not okp:
-        okp, out = git("push", "origin", "main")
-        if okp:
-            git("push", "origin", pre, "-f")
+    okp, out = git("push", "origin", "main")
     if not okp:
         return fail("predeploy", f"push failed: {out.splitlines()[-1] if out else ''}")
+    okp, out = git("push", "-f", "origin", f"refs/tags/{pre}")
+    if not okp:
+        return fail("predeploy", f"tag push failed: {out.splitlines()[-1] if out else ''}")
+    if not remote_has_tag(pre):
+        return fail("predeploy", f"{pre} is not on the remote after pushing")
     step("predeploy", "ok", pre)
-    log(f"predeploy pushed: {pre}")
+    log(f"predeploy pushed and verified on remote: {pre}")
 
     # 2. build immediately after the predeploy push
     step("build", "run")
@@ -331,11 +340,13 @@ def workflow(name):
     # 4. deployed commit + push
     step("deployed", "run")
     setk(phase="deployed")
-    git("tag", "-f", done_tag)
-    okp, out = git("push", "origin", "main", "--follow-tags", "--force-with-lease")
-    if not okp:
-        git("push", "origin", done_tag, "-f")
+    git("tag", "-f", "-a", done_tag, "-m", f"Deployed {ts} {safe}")
+    git("push", "origin", "main")
+    okp, out = git("push", "-f", "origin", f"refs/tags/{done_tag}")
+    if not okp or not remote_has_tag(done_tag):
+        return fail("deployed", f"tag push failed: {out.splitlines()[-1] if out else ''}")
     step("deployed", "ok", done_tag)
+    log(f"deployed pushed and verified on remote: {done_tag}")
 
     setk(phase="done")
     st = load_state()
