@@ -1,6 +1,6 @@
-#define ZMK_POINTING_DEFAULT_MOVE_VAL 2400  // very fast (QWERTY joystick)
+#define ZMK_POINTING_DEFAULT_MOVE_VAL 1200  // QWERTY joystick; 2400 broke left/right
 #define ZMK_POINTING_DEFAULT_SCRL_VAL 25   // 10
-#define ZMK_POINTING_SLOW_MOVE_VAL 1200  // half speed (NAV joystick)
+#define ZMK_POINTING_SLOW_MOVE_VAL 600  // NAV joystick, half of QWERTY
 #define SLOW_UP    MOVE_Y(-ZMK_POINTING_SLOW_MOVE_VAL)
 #define SLOW_DOWN  MOVE_Y(ZMK_POINTING_SLOW_MOVE_VAL)
 #define SLOW_LEFT  MOVE_X(-ZMK_POINTING_SLOW_MOVE_VAL)
@@ -70,8 +70,8 @@
             display-name = "NAV";
             bindings = <
   &kp TAB            &kp LC(LALT)       &kp LC(LGUI)       &kp LG(LALT)       &kp LS(LG(UP))     &kp LS(LG(DOWN))   &mmv SLOW_UP       &kp N1             &kp HOME           &kp PG_DN          &kp PG_UP          &kp END            &kp EQUAL
-  &kp TAB            &kp LCTRL          &kp LGUI           &kp LALT           &kp LS(LG(LEFT))   &kp LS(LG(RIGHT))  &mmv SLOW_LEFT     &mkp LCLK          &mmv SLOW_RIGHT    &kp LS(SEMI)       &kp LEFT           &kp DOWN           &kp UP             &kp RIGHT          &kp MINUS
-  &kp RSHFT          &kp LG(Z)          &kp LG(X)          &kp LG(C)          &kp LG(V)          &kp LG(Y)          &mkp RCLK          &mmv SLOW_DOWN     &kp FSLH           &kp LBKT           &kp LS(MINUS)      &kp LS(EQUAL)      &kp RBKT           &kp RSHFT
+  &kp TAB            &kp LCTRL          &kp LGUI           &kp LALT           &kp LS(LG(LEFT))   &kp LS(LG(RIGHT))  &mmv SLOW_LEFT     &trans             &mmv SLOW_RIGHT    &kp LS(SEMI)       &kp LEFT           &kp DOWN           &kp UP             &kp RIGHT          &kp MINUS
+  &kp RSHFT          &kp LG(Z)          &kp LG(X)          &kp LG(C)          &kp LG(V)          &kp LG(Y)          &trans             &mmv SLOW_DOWN     &kp FSLH           &kp LBKT           &kp LS(MINUS)      &kp LS(EQUAL)      &kp RBKT           &kp RSHFT
   &kp LG(SPACE)      &kp RSHFT          &kp LALT           &kp RSHFT          &kp TAB            &trans
             >;
 
@@ -82,7 +82,7 @@
             display-name = "NUMBER";
             bindings = <
   &kp TAB        &kp N1         &kp N2         &kp N3         &kp N4         &kp N5         &trans         &kp N6         &kp N7         &kp N8         &kp N9         &kp N0         &kp LS(EQUAL)
-  &kp TAB        &kp LS(N1)     &kp LS(N2)     &kp LS(N3)     &kp LS(N4)     &kp LS(N5)     &trans         &mkp LCLK      &mkp RCLK      &kp LS(N6)     &kp LS(N7)     &kp LS(N8)     &kp LS(N9)     &kp LS(N0)     &kp MINUS
+  &kp TAB        &kp LS(N1)     &kp LS(N2)     &kp LS(N3)     &kp LS(N4)     &kp LS(N5)     &trans         &trans         &mkp RCLK      &kp LS(N6)     &kp LS(N7)     &kp LS(N8)     &kp LS(N9)     &kp LS(N0)     &kp MINUS
   &kp LSHFT      &kp F1         &kp F2         &kp F3         &kp F4         &kp F5         &trans         &trans         &kp F6         &kp F7         &kp F8         &kp F9         &kp F10        &kp RSHFT
   &trans         &kp BSPC       &kp DEL        &kp RET        &trans         &trans
             >;
@@ -94,7 +94,7 @@
             display-name = "SYMBOL";
             bindings = <
   &kp TAB          &kp LS(N1)       &kp LS(N2)       &kp LS(N3)       &kp LS(N4)       &kp LS(N5)       &trans           &kp LS(LBKT)     &kp LBKT         &kp LS(N9)       &kp LS(N0)       &kp RBKT         &kp LS(RBKT)
-  &trans           &trans           &trans           &trans           &trans           &trans           &trans           &kp LS(N5)       &kp LS(SEMI)     &kp KP_PLUS      &kp KP_MULTIPLY  &kp LS(MINUS)    &kp MINUS        &kp KP_DIVIDE    &kp KP_EQUAL
+  &trans           &trans           &trans           &trans           &trans           &trans           &trans           &trans           &kp LS(SEMI)     &kp KP_PLUS      &kp KP_MULTIPLY  &kp LS(MINUS)    &kp MINUS        &kp KP_DIVIDE    &kp KP_EQUAL
   &kp LSHFT        &kp K_UNDO       &kp K_CUT        &kp K_COPY       &kp K_PASTE      &kp K_AGAIN      &trans           &trans           &kp LS(N7)       &kp GRAVE        &kp BSLH         &kp FSLH         &kp LS(N1)       &kp LS(N6)
   &trans           &trans           &trans           &kp RET          &trans           &trans
             >;
