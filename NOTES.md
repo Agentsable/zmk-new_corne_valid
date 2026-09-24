@@ -2,43 +2,41 @@
 
 Things about this repo and this board that are not obvious from the code.
 
-## Open: joystick left/right do not move the mouse on QWERTY
+## Solved: joystick left/right did not move the mouse on QWERTY
 
-**Symptom.** On the QWERTY layer the joystick's left/right push moves the *text*
-cursor. On NAV the same two switches move the mouse pointer correctly.
+**Symptom.** On QWERTY the joystick's left/right push moved the *text* cursor; on
+NAV the same two switches moved the mouse pointer correctly.
 
-**What has been ruled out.**
+**Cause.** ZMK Studio had a customised keymap saved in the keyboard's settings
+partition. A stored keymap overrides the compiled one and survives a firmware
+flash, so the board never ran the firmware we kept building. Connecting Studio
+showed the joystick cluster as `<-` `Ret` `->` -- literal arrow keys and Enter --
+while the compiled devicetree held `&mmv` / `&mkp` the whole time.
 
-- Not the keymap. Positions 19 and 21 hold `&mmv MOVE_LEFT` / `&mmv MOVE_RIGHT`,
-  verified in the compiled devicetree (`build/left_nice/zephyr/zephyr.dts`) on
-  every build. The Source verification page traces all 192 bindings back to
-  `config/eyelash_corne.keymap`.
-- Not the position mapping. `tools/flasher/layout.py` derives the joystick from
-  the matrix transform by finding the column whose five keys form a plus. It
-  independently produces the same indices: 6=up, 19=left, 20=centre, 21=right,
-  35=down, all on column 12; rotary at index 34 / `RC(3,2)`.
-- Not the speed. Tried 2400, then 1200, then 600. NAV works at every value
-  tested; QWERTY fails at every value tested. The layer is the variable, not the
-  magnitude.
-- Not an axis bug. `&mmv` packs X and Y into one 32-bit value, decodes both in
-  one function, and emits them in one HID report. No code path moves Y but not X.
+**Fix.** ZMK Studio -> device menu (top centre) -> **Restore Stock Settings**.
+Confirmed working 2026-09-24.
 
-**Leading hypothesis: ZMK Studio is overriding layer 0 at runtime.**
-`CONFIG_ZMK_STUDIO`, `CONFIG_SETTINGS` and `CONFIG_ZMK_SETTINGS_RPC` are all
-enabled, so Studio writes keymap edits into the settings partition. Those
-override the compiled keymap and survive a firmware flash, which fits every
-observation: the devicetree keeps verifying correct, NAV is untouched, and five
-reflashes changed nothing.
+Verified afterwards by selecting each key in Studio and reading the Behavior
+panel, because Studio draws `&mmv` / `&mkp` as blank key caps:
 
-**To confirm or kill it:**
+| Position | Behavior | Value |
+|---|---|---|
+| Joystick up | `mouse_move` | 64336 (Y -1200) |
+| Joystick down | `mouse_move` | 1200 (Y +1200) |
+| Joystick left | `mouse_move` | 4216913920 (X -1200) |
+| Joystick right | `mouse_move` | 78643200 (X +1200) |
+| Joystick centre | Mouse Key Press | MB1, left click |
+| Rotary push | Mouse Key Press | MB2, right click |
 
-1. Open ZMK Studio and restore/reset the keymap to the firmware default. If the
-   pointer then moves on QWERTY, that was it.
-2. Otherwise flash the `settings_reset` shield to the left half and reflash.
-   CI builds it (`build.yaml`); a local build of it currently fails to resolve
-   the Zephyr CMake package in a fresh build directory.
-3. If neither helps, bind positions 19 and 21 to visible letters on a spare
-   layer and see whether the switches register at all.
+**The lesson worth keeping.** Five reflashes changed nothing and the compiled
+devicetree verified correct every time, because the firmware was never what the
+board was running. When ZMK behaviour disagrees with a verified keymap, suspect
+stored settings before touching the keymap again.
+
+Connecting Studio from browser automation needs
+`navigator.serial.requestPort` patched to return the already-granted port from
+`getPorts()`; the native port picker cannot be driven by a synthetic click.
+
 
 ## CI does not run on push
 
