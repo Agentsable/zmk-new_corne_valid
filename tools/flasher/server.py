@@ -27,7 +27,6 @@ WAIT_TIMEOUT = 900  # seconds to wait for a double-tap, per half
 VERSION_FMT = "%d-%m-%y_%H-%M"      # e.g. 24-09-26_18-48
 DOCKER_IMAGE = "zmkfirmware/zmk-build-arm:stable"
 SHIELDS = {"left": "eyelash_corne_left nice_oled", "right": "eyelash_corne_right nice_oled"}
-OVERLAY = "/workspace/boards/shields/eyelash_corne/oled.dtsi"
 
 LOCK = threading.Lock()
 STATE = {"phase": "idle", "left": "blank", "right": "blank", "log": [], "error": "",
@@ -66,8 +65,7 @@ def build_halves():
         script.append(
             f'west build -s zmk/app -b nice_nano_v2 -d build/{side}_nice '
             f'-S studio-rpc-usb-uart --pristine=never -- '
-            f'-DSHIELD="{shield}" -DZMK_CONFIG=/workspace/config '
-            f'-DEXTRA_DTC_OVERLAY_FILE={OVERLAY}')
+            f'-DSHIELD="{shield}" -DZMK_CONFIG=/workspace/config')
         script.append(f'echo BUILT {side}')
     cmd = ["docker", "run", "--rm", "-v", f"{REPO}:/workspace", "-w", "/workspace",
            DOCKER_IMAGE, "bash", "-c", "\n".join(script)]

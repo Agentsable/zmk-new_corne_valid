@@ -1,3 +1,8 @@
+/* Include guard: the shield overlays include this, and a stale build cache may
+   still pass it via EXTRA_DTC_OVERLAY_FILE. Double inclusion would redefine
+   the pinctrl labels. */
+#pragma once
+
 /* Display: I2C SSD1306 OLED, 128x32.
    Values taken verbatim from the vendor's own OLED firmware:
    github.com/a741725193/zmk-corne-oled -> boards/shields/eyelash_corne/eyelash_corne.dtsi

@@ -6,6 +6,9 @@
 */
 
 #include "eyelash_corne.dtsi"
+/* SSD1306 I2C display. Lives in the shield, not a build flag, so CI and
+   local builds get it without an absolute path that only exists in one. */
+#include "oled.dtsi"
 #include <behaviors/battery_history_request.dtsi>
 
 &default_transform {
