@@ -1,5 +1,37 @@
-build/
-zmk/
-modules/
-tools/
-.west/
+# --- build outputs -----------------------------------------------------------
+/build/
+# locally built .uf2 images; CI artifacts are the shareable ones
+/firmware/
+
+# --- west-managed dependencies -----------------------------------------------
+# All restored by `west update`; see config/west.yml.
+/.west/
+/zephyr/
+/zmk/
+/modules/
+/eyelash_corne/
+/zmk-behavior-runtime-sensor-rotate/
+/zmk-module-battery-history/
+/zmk-module-ble-management/
+/zmk-module-runtime-input-processor/
+/zmk-module-settings-rpc/
+/zmk-nice-oled/
+
+# --- local flasher tool: keep the source, drop the generated parts ------------
+tools/flasher/web/node_modules/
+tools/flasher/web/dist/
+tools/flasher/__pycache__/
+tools/flasher/state.json
+tools/flasher/server.log
+
+# --- unrelated / scratch -----------------------------------------------------
+# Vial files for a different keyboard
+/standard_wcorne/
+/screenshots/
+/keymap-drawer/layers/
+
+# --- editor / OS -------------------------------------------------------------
+.DS_Store
+.claude-trace
+.claudeignore
+.cursorignore

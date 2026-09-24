@@ -1,11 +1,17 @@
 ---
+# This board carries SSD1306 I2C OLEDs on both halves, NOT nice!view.
+# Building with nice_view leaves spi0 enabled, which blocks the I2C bus the
+# panels need -- the symptom is a screen of random pixels. The oled.dtsi
+# overlay supplies the display node; the nice_oled shield supplies the widgets.
 include:
   - board: nice_nano_v2
-    shield: eyelash_corne_right nice_view
+    shield: eyelash_corne_right nice_oled
+    cmake-args: -DEXTRA_DTC_OVERLAY_FILE=/workspace/boards/shields/eyelash_corne/oled.dtsi
+    artifact-name: eyelash_corne_right
   - board: nice_nano_v2
-    shield: eyelash_corne_left nice_view
+    shield: eyelash_corne_left nice_oled
     snippet: studio-rpc-usb-uart
-    cmake-args: -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_STUDIO_LOCKING=n
+    cmake-args: -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_STUDIO_LOCKING=n -DEXTRA_DTC_OVERLAY_FILE=/workspace/boards/shields/eyelash_corne/oled.dtsi
     artifact-name: eyelash_corne_studio_left
   - board: nice_nano_v2
     shield: settings_reset
