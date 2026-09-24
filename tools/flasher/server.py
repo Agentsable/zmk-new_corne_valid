@@ -292,8 +292,15 @@ def workflow(name):
     setk(phase="predeploy")
     git("add", "config/eyelash_corne.keymap")
     okc, out = git("commit", "-m", pre)
-    if not okc and "nothing to commit" not in out:
+    # A clean tree is normal: a version may tag an unchanged keymap. git words
+    # this two different ways depending on whether anything was staged.
+    clean = any(m in out for m in ("nothing to commit",
+                                   "no changes added to commit",
+                                   "nothing added to commit"))
+    if not okc and not clean:
         return fail("predeploy", f"commit failed: {out.splitlines()[-1] if out else ''}")
+    if clean:
+        log("predeploy: keymap unchanged, tagging current commit")
     okt, out = git("tag", "-f", pre)
     if not okt:
         return fail("predeploy", f"tag failed: {out}")

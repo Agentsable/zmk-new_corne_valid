@@ -3,11 +3,13 @@ import Deploy from "./Deploy.jsx";
 import Keymap from "./Keymap.jsx";
 import RequestCard from "./Request.jsx";
 import Verify from "./Verify.jsx";
+import Workflow from "./Workflow.jsx";
 
 const NAV = [
   { id: "deploy", label: "Firmware update" },
   { id: "current", label: "Current keymap" },
   { id: "pending", label: "Update request" },
+  { id: "workflow", label: "Deployment workflow" },
   { id: "verify", label: "Source verification" },
 ];
 
@@ -42,6 +44,7 @@ export default function App() {
       <main className="content">
         {page === "deploy" && <Deploy />}
         {page === "verify" && <Verify />}
+        {page === "workflow" && <Workflow />}
 
         {page === "current" && (
           <div className="page">
