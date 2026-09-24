@@ -26,6 +26,10 @@ HEX = {"left": "build/left_nice/zephyr/zmk.hex", "right": "build/right_nice/zeph
 WAIT_TIMEOUT = 900  # seconds to wait for a double-tap, per half
 VERSION_FMT = "%d-%m-%y_%H-%M"      # e.g. 24-09-26_18-48
 DOCKER_IMAGE = "zmkfirmware/zmk-build-arm:stable"
+# Local builds must pass the display overlay explicitly: the eyelash_corne west
+# module ships a duplicate shield that shadows this repo's copy, so the
+# #include in our overlay never reaches dtc here. CI has no such shadow.
+OVERLAY = "/workspace/boards/shields/eyelash_corne/oled.dtsi"
 SHIELDS = {"left": "eyelash_corne_left nice_oled", "right": "eyelash_corne_right nice_oled"}
 
 LOCK = threading.Lock()
@@ -66,12 +70,13 @@ def remote_has_tag(tag):
 
 def build_halves():
     """Run the same Docker build that produces the flashed firmware."""
-    script = ["set -e"]
+    script = ["set -e", "west zephyr-export >/dev/null 2>&1"]
     for side, shield in SHIELDS.items():
         script.append(
             f'west build -s zmk/app -b nice_nano_v2 -d build/{side}_nice '
             f'-S studio-rpc-usb-uart --pristine=never -- '
-            f'-DSHIELD="{shield}" -DZMK_CONFIG=/workspace/config')
+            f'-DSHIELD="{shield}" -DZMK_CONFIG=/workspace/config '
+            f'-DEXTRA_DTC_OVERLAY_FILE={OVERLAY}')
         script.append(f'echo BUILT {side}')
     cmd = ["docker", "run", "--rm", "-v", f"{REPO}:/workspace", "-w", "/workspace",
            DOCKER_IMAGE, "bash", "-c", "\n".join(script)]

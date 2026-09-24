@@ -1,6 +1,7 @@
-/* Include guard: the shield overlays include this, and a stale build cache may
-   still pass it via EXTRA_DTC_OVERLAY_FILE. Double inclusion would redefine
-   the pinctrl labels. */
+/* Guard: this file reaches the build two ways -- included by the shield
+   overlay (CI) and passed via EXTRA_DTC_OVERLAY_FILE (local builds, where
+   the eyelash_corne west module shadows this repo's shield). Either alone
+   is enough; the guard makes both at once harmless. */
 #pragma once
 
 /* Display: I2C SSD1306 OLED, 128x32.
