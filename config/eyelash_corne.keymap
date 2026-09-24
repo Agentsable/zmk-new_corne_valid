@@ -1,6 +1,6 @@
-#define ZMK_POINTING_DEFAULT_MOVE_VAL 1200  // 600
+#define ZMK_POINTING_DEFAULT_MOVE_VAL 2400  // very fast (QWERTY joystick)
 #define ZMK_POINTING_DEFAULT_SCRL_VAL 25   // 10
-#define ZMK_POINTING_SLOW_MOVE_VAL 300
+#define ZMK_POINTING_SLOW_MOVE_VAL 1200  // half speed (NAV joystick)
 #define SLOW_UP    MOVE_Y(-ZMK_POINTING_SLOW_MOVE_VAL)
 #define SLOW_DOWN  MOVE_Y(ZMK_POINTING_SLOW_MOVE_VAL)
 #define SLOW_LEFT  MOVE_X(-ZMK_POINTING_SLOW_MOVE_VAL)
@@ -58,8 +58,8 @@
             display-name = "QWERTY";
             bindings = <
   &kp ESC          &kp Q            &kp W            &kp E            &kp R            &kp T            &mmv MOVE_UP     &kp Y            &kp U            &kp I            &kp O            &kp P            &kp RCTRL
-  &mo 1            &kp A            &kp S            &kp D            &kp F            &kp G            &mmv MOVE_LEFT   &kp RBKT         &mmv MOVE_RIGHT  &kp H            &kp J            &kp K            &kp L            &kp SEMI         &kp SQT
-  &kp LGUI         &kp Z            &kp X            &kp C            &kp V            &kp B            &kp LBKT         &mmv MOVE_DOWN   &kp N            &kp M            &kp COMMA        &kp DOT          &kp FSLH         &kp RSHFT
+  &mo 1            &kp A            &kp S            &kp D            &kp F            &kp G            &mmv MOVE_LEFT   &mkp LCLK        &mmv MOVE_RIGHT  &kp H            &kp J            &kp K            &kp L            &kp SEMI         &kp SQT
+  &kp LGUI         &kp Z            &kp X            &kp C            &kp V            &kp B            &mkp RCLK        &mmv MOVE_DOWN   &kp N            &kp M            &kp COMMA        &kp DOT          &kp FSLH         &kp RSHFT
   &kp LCTRL        &kp BSPC         &kp DEL          &kp RET          &lt 2 SPACE      &mo 3
             >;
 
@@ -71,7 +71,7 @@
             bindings = <
   &kp TAB            &kp LC(LALT)       &kp LC(LGUI)       &kp LG(LALT)       &kp LS(LG(UP))     &kp LS(LG(DOWN))   &mmv SLOW_UP       &kp N1             &kp HOME           &kp PG_DN          &kp PG_UP          &kp END            &kp EQUAL
   &kp TAB            &kp LCTRL          &kp LGUI           &kp LALT           &kp LS(LG(LEFT))   &kp LS(LG(RIGHT))  &mmv SLOW_LEFT     &mkp LCLK          &mmv SLOW_RIGHT    &kp LS(SEMI)       &kp LEFT           &kp DOWN           &kp UP             &kp RIGHT          &kp MINUS
-  &kp RSHFT          &kp LG(Z)          &kp LG(X)          &kp LG(C)          &kp LG(V)          &kp LG(Y)          &kp LS(KP_ENTER)   &mmv SLOW_DOWN     &kp FSLH           &kp LBKT           &kp LS(MINUS)      &kp LS(EQUAL)      &kp RBKT           &kp RSHFT
+  &kp RSHFT          &kp LG(Z)          &kp LG(X)          &kp LG(C)          &kp LG(V)          &kp LG(Y)          &mkp RCLK          &mmv SLOW_DOWN     &kp FSLH           &kp LBKT           &kp LS(MINUS)      &kp LS(EQUAL)      &kp RBKT           &kp RSHFT
   &kp LG(SPACE)      &kp RSHFT          &kp LALT           &kp RSHFT          &kp TAB            &trans
             >;
 
