@@ -38,6 +38,49 @@ Connecting Studio from browser automation needs
 `getPorts()`; the native port picker cannot be driven by a synthetic click.
 
 
+## The west module shadows this repo's shield
+
+`config/west.yml` pulls `a741725193/zmk-new_corne` as a module, and that module
+ships a **duplicate copy of this board's shield**. Locally the module's copy
+wins, so edits to `boards/shields/eyelash_corne/*.overlay` in this repo have no
+effect on a local build. Check which file dtc actually read:
+
+    grep -oE "/workspace[^ :]*eyelash_corne_right.overlay" build/right_nice/zephyr/zephyr.dts.d
+
+If that prints `/workspace/eyelash_corne/boards/...`, the module won.
+
+**Do not remove the module from west.yml to fix this.** It was tried: both halves
+then fail to configure, because this repo's `zephyr/module.yml` (which declares
+`board_root: .`) sits underneath west's own 552 MB Zephyr checkout at the same
+path and never registers. The shield comes *only* from that module.
+
+So the display node reaches the build two different ways, on purpose:
+
+| Environment | Mechanism |
+|---|---|
+| CI | `#include "oled.dtsi"` in the shield overlay -- nothing shadows it there |
+| Local | `-DEXTRA_DTC_OVERLAY_FILE=.../oled.dtsi` passed by the flasher |
+
+`oled.dtsi` carries a `#pragma once`, so both applying at once is harmless.
+
+**Symptom if this breaks:** the right half fails with
+`'__device_dts_ord_DT_CHOSEN_zephyr_display_ORD' undeclared`. That means
+`CONFIG_ZMK_DISPLAY=y` (from the nice_oled shield) but no display node in the
+devicetree. Confirm with `grep -c ssd1306@3c build/<side>_nice/zephyr/zephyr.dts`
+-- it should be 1.
+
+## Fresh build directories need west zephyr-export
+
+A build directory with no CMake cache cannot resolve the Zephyr CMake package:
+
+    CMake Error at CMakeLists.txt:9 (find_package):
+      Could not find a package configuration file provided by "Zephyr"
+
+The container has no CMake package registry. Run `west zephyr-export` first;
+`build_halves()` in the flasher does this. Incremental builds only worked because
+their cache already held `Zephyr_DIR`, which is why this stayed hidden until a
+build directory got wiped.
+
 ## CI does not run on push
 
 This repo is a fork of `a741725193/zmk-new_corne`, and GitHub disables workflows
