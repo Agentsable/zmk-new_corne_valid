@@ -72,9 +72,13 @@ def build_halves():
     """Run the same Docker build that produces the flashed firmware."""
     script = ["set -e", "west zephyr-export >/dev/null 2>&1"]
     for side, shield in SHIELDS.items():
+        # Only the left half is the Studio central; the snippet adds an unused
+        # USB CDC/console to the peripheral and made local right-half firmware
+        # 6.6 KB larger than CI's for no reason.
+        snippet = "-S studio-rpc-usb-uart " if side == "left" else ""
         script.append(
             f'west build -s zmk/app -b nice_nano_v2 -d build/{side}_nice '
-            f'-S studio-rpc-usb-uart --pristine=never -- '
+            f'{snippet}--pristine=never -- '
             f'-DSHIELD="{shield}" -DZMK_CONFIG=/workspace/config '
             f'-DEXTRA_DTC_OVERLAY_FILE={OVERLAY}')
         script.append(f'echo BUILT {side}')
