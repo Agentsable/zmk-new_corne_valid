@@ -404,7 +404,14 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def log_message(self, *a):
-        pass
+        pass  # GETs are pure polling; noise, not signal
+
+    def _audit(self, path, extra=""):
+        """Record every mutating request. A file changed under us once with no
+        trace of who did it; unexplained writes should be attributable."""
+        peer = self.client_address[0] if self.client_address else "?"
+        ua = (self.headers.get("User-Agent") or "")[:60]
+        log(f"POST {path} from {peer} [{ua}] {extra}")
 
     def do_GET(self):
         if self.path.startswith("/api/verify"):
@@ -450,6 +457,7 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         n = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(n)
+        self._audit(self.path.split("?")[0])
         if self.path.startswith("/api/start"):
             with LOCK:
                 if STATE["phase"] not in ("idle", "error", "done"):
@@ -486,7 +494,9 @@ class H(BaseHTTPRequestHandler):
                                or f"Edited {len(edits)} key(s) via the flasher",
                 "at": time.time(), "sha": keymap_sha()}
             save_state(st)
-            log(f"keymap saved: {len(edits)} edit(s)")
+            log(f"keymap saved: {len(edits)} edit(s) -> " +
+                ", ".join(f"{e.get('layer')}[{e.get('index')}]={e.get('binding')}"
+                          for e in edits[:6]))
             return self._send(200, {"ok": True, "sha": st["pending"]["sha"]})
         if self.path.startswith("/api/push"):
             with LOCK:
