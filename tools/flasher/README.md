@@ -6,8 +6,9 @@ halves over serial DFU, and tags each release in git.
     ./run.sh                      # http://127.0.0.1:8787
     ./deploy.py "version name"    # same workflow, from the terminal
 
-Requires Docker (for `west build`) and `adafruit-nrfutil` in a venv; `run.sh`
-points `NRFUTIL` and `PKG_DIR` at them.
+Requires only Docker (for `west build`). On first run `run.sh` creates `.venv`
+with `adafruit-nrfutil` and a `pkg/` directory for DFU packages; both are
+gitignored. Override with `NRFUTIL` / `PKG_DIR` if you keep them elsewhere.
 
 ## Why this exists
 
@@ -43,5 +44,13 @@ writes so the UF2 bootloader never sees them. Drag-flashing a `.uf2` onto
   board still running its firmware gets flashed and dies mid-write.
 - ZMK ignores the 1200-baud touch reset, so the physical double-tap cannot be
   automated away. Binding `&bootloader` to a combo would remove it for good.
+
+- Local builds must pass the display overlay explicitly -- the `eyelash_corne`
+  west module ships a duplicate shield that shadows this repo's copy. CI is not
+  affected. See `NOTES.md`.
+- A fresh build directory needs `west zephyr-export` before it can resolve the
+  Zephyr CMake package. `build_halves()` does this.
+- Only the left half gets `-S studio-rpc-usb-uart`; it is the Studio central.
+  Applying it to the peripheral just adds an unused CDC/console.
 
 Run the self-check with `python3 test_detect.py`.

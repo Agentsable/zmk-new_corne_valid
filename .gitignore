@@ -20,6 +20,8 @@
 # --- local flasher tool: keep the source, drop the generated parts ------------
 tools/flasher/web/node_modules/
 tools/flasher/web/dist/
+tools/flasher/.venv/
+tools/flasher/pkg/
 tools/flasher/__pycache__/
 tools/flasher/state.json
 tools/flasher/server.log
