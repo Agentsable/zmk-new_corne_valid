@@ -37,7 +37,9 @@ export default function Deploy() {
   if (!s) return <div className="page" />;
 
   const running = !["idle", "error", "done"].includes(s.phase);
-  const when = s.request.at
+  // request is absent when the hosted app answers 401 (no session) or reports
+  // the Mac offline, so this cannot assume it is there.
+  const when = s.request?.at
     ? new Date(s.request.at * 1000).toLocaleString(undefined,
         { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
     : "—";
@@ -55,7 +57,7 @@ export default function Deploy() {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name }) })}>
         <span className="req-when">Update requested {when}</span>
-        <span className="req-desc">{s.request.description}</span>
+        <span className="req-desc">{s.request?.description}</span>
       </button>
 
       <div className="sides">

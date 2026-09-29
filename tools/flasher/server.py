@@ -8,7 +8,7 @@ when both are green the commit can be pushed.
 Flashing shells out to adafruit-nrfutil: the Nordic legacy DFU protocol is not
 worth reimplementing just to reach it from a browser.
 """
-import hashlib, json, os, re, subprocess, threading, time
+import hashlib, hmac, json, os, re, subprocess, threading, time
 
 import keymap as keymap_mod
 import verify as verify_mod
@@ -17,6 +17,19 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.join(ROOT, "web", "dist")
 REPO = os.path.abspath(os.path.join(ROOT, "..", ".."))
+
+
+def current_build():
+    """Identity of the UI being served: Vite's content hash in the bundle name.
+
+    ponytail: the filename is already a content hash, so there is nothing to
+    compute or store. Empty when dist is missing, which disables the check.
+    """
+    try:
+        return next(f for f in sorted(os.listdir(os.path.join(DIST, "assets")))
+                    if f.endswith(".js"))
+    except (OSError, StopIteration):
+        return ""
 PORT = int(os.environ.get("FLASHER_PORT", "8787"))
 NRFUTIL = os.environ.get("NRFUTIL", "")
 PKG_DIR = os.environ.get("PKG_DIR", "")
@@ -154,6 +167,17 @@ def bootloader_port(baseline):
 
 
 KEYMAP = os.path.join(REPO, "config", "eyelash_corne.keymap")
+# Shared secret for requests that arrive through the Cloudflare tunnel. Written
+# by the hosted-app setup; absent on a machine that never hosts, where remote
+# requests are refused outright rather than allowed through unchecked.
+REMOTE_SECRET_FILE = os.path.join(ROOT, ".remote-secret")
+
+
+def remote_secret():
+    try:
+        return open(REMOTE_SECRET_FILE).read().strip()
+    except OSError:
+        return ""
 STATE_FILE = os.path.join(ROOT, "state.json")
 
 
@@ -226,6 +250,7 @@ def request_info():
     return {"open": is_open,
             "at": (pending or {}).get("at", 0),
             "description": (pending or {}).get("description", ""),
+            "sha": sha,
             "last": last}
 
 
@@ -452,7 +477,27 @@ class H(BaseHTTPRequestHandler):
         ua = (self.headers.get("User-Agent") or "")[:60]
         log(f"POST {path} from {peer} [{ua}] {extra}")
 
+    def _remote_ok(self):
+        """Refuse tunnel traffic that does not carry the shared secret.
+
+        Cf-Ray is set by Cloudflare, so it marks exactly the requests that came
+        in over the tunnel; a direct call from this Mac never has it and is left
+        alone. Checked in one place because every route -- flashing, saving the
+        keymap, driving git -- is equally worth protecting.
+        """
+        if not self.headers.get("Cf-Ray"):
+            return True
+        want = remote_secret()
+        got = self.headers.get("X-Flasher-Secret", "")
+        if want and hmac.compare_digest(want, got):
+            return True
+        log(f"refused remote request to {self.path.split('?')[0]} (bad or missing secret)")
+        self._send(403, {"error": "not authorised"})
+        return False
+
     def do_GET(self):
+        if not self._remote_ok():
+            return
         if self.path.startswith("/api/verify"):
             try:
                 return self._send(200, verify_mod.run(REPO))
@@ -494,20 +539,41 @@ class H(BaseHTTPRequestHandler):
             self._send(200, f.read(), ctype)
 
     def do_POST(self):
+        if not self._remote_ok():
+            return
         n = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(n)
         self._audit(self.path.split("?")[0])
         if self.path.startswith("/api/start"):
+            try:
+                body = json.loads(raw or b"{}") or {}
+            except Exception:
+                body = {}
+            # A tab loaded before the last rebuild runs code we have already
+            # fixed. That is how 22:38 and 23:07 were lost: a stale page posted
+            # straight here, skipping the save, and flashed a keymap without the
+            # edits queued in it. Refuse rather than deploy on behalf of code
+            # this server is no longer serving.
+            # Cf-Ray is added by Cloudflare, so it is present only on requests
+            # that arrived through the tunnel and absent on a direct local call.
+            # The hosted UI is rebuilt from git on every push, so it cannot be
+            # the stale cached tab this guard exists to catch -- a marker is
+            # enough there, while local tabs keep the strict hash check.
+            supplied = body.get("build", "")
+            if self.headers.get("Cf-Ray"):
+                stale = not supplied.startswith("remote:")
+            else:
+                cur = current_build()
+                stale = bool(cur) and supplied != cur
+            if stale:
+                return self._send(409, {"error":
+                    "This page is out of date - reload it (Cmd-R) and send again."})
+            name = body.get("name", "")
             with LOCK:
                 if STATE["phase"] not in ("idle", "error", "done"):
                     return self._send(409, {"error": "already running"})
                 STATE.update(phase="starting", left="blank", right="blank",
                              log=[], error="")
-            name = ""
-            try:
-                name = (json.loads(raw or b"{}") or {}).get("name", "")
-            except Exception:
-                pass
             target = (lambda: workflow(name)) if name else sequence
             threading.Thread(target=target, daemon=True).start()
             return self._send(200, {"ok": True, "named": bool(name)})

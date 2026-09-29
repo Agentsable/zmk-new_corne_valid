@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "keys-flasher",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-29",
+  "account_id": "be27a3790e3187d548ccdef0217c461b",
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    // The app is hash-routed, so every real path is index.html.
+    "not_found_handling": "single-page-application",
+    // Without this the SPA fallback would answer /api/* with index.html and the
+    // Worker would never see the request.
+    "run_worker_first": ["/api/*", "/queue", "/queue/*", "/login"]
+  },
+  "kv_namespaces": [
+    { "binding": "QUEUE", "id": "b56bbf82e9b649ffafa82ca811715622" }
+  ],
+  "vars": {
+    "LOCAL_ORIGIN": "https://flasher.hyperdev.app"
+  }
+}

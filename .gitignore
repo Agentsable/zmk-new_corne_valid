@@ -37,3 +37,12 @@ tools/flasher/server.log
 .claude-trace
 .claudeignore
 .cursorignore
+
+# cloudflared tunnel credential for the hosted flasher -- never commit
+tools/flasher/.tunnel-token
+tools/flasher/.access-token.json
+tools/flasher/.hosted-secrets.json
+tools/flasher/.remote-secret
+
+# runtime log from connect.sh
+tools/flasher/tunnel.log

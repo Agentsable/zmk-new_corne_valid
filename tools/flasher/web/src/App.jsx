@@ -7,6 +7,7 @@ import Verify from "./Verify.jsx";
 import Workflow from "./Workflow.jsx";
 import Coords from "./Coords.jsx";
 import ZmkUpdate from "./ZmkUpdate.jsx";
+import Connection from "./Connection.jsx";
 
 const NAV = [
   { id: "deploy", label: "Firmware update" },
@@ -50,6 +51,8 @@ export default function App() {
 
   return (
     <div className="shell">
+      <Connection />
+
       <aside className="sidebar">
         <div className="brand">Eyelash Corne</div>
         <nav>

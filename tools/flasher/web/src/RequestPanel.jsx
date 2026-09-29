@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 
+// The bundle this page was loaded from. A tab left open across a rebuild keeps
+// running the old code; the server compares this and refuses to deploy for it.
+const BUILD = import.meta.url.split("/").pop();
+
 /** Right-hand panel: everything queued for the next firmware update.
  *
  * Two kinds of change live here. Pending edits are in the browser and not yet
@@ -69,7 +73,7 @@ export default function RequestPanel({ pending = [], onAdd, onDiscard, onSaved, 
     }
     const r = await fetch("/api/start", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, build: BUILD }),
     });
     const j = await r.json().catch(() => ({}));
     setStarting(false);
