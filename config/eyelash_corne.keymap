@@ -93,7 +93,7 @@
         layer_3 {
             display-name = "SYMBOL";
             bindings = <
-  &studio_unlock   &kp LS(N1)       &kp LS(N2)       &kp LS(N3)       &kp LS(N4)       &kp LS(N5)       &trans           &kp LS(LBKT)     &kp LBKT         &kp LS(N9)       &kp LS(N0)       &kp RBKT         &kp LS(RBKT)
+  &studio_unlock   &bootloader      &none            &none            &none            &none            &trans           &kp LS(LBKT)     &kp LBKT         &kp LS(N9)       &kp LS(N0)       &bootloader      &kp LS(RBKT)
   &trans           &trans           &trans           &trans           &trans           &trans           &trans           &trans           &trans           &kp KP_PLUS      &kp KP_MULTIPLY  &kp LS(MINUS)    &kp MINUS        &kp KP_DIVIDE    &kp KP_EQUAL
   &kp LSHFT        &kp K_UNDO       &kp K_CUT        &kp K_COPY       &kp K_PASTE      &kp K_AGAIN      &trans           &trans           &kp LS(N7)       &kp GRAVE        &kp BSLH         &kp FSLH         &kp LS(N1)       &kp LS(N6)
   &trans           &trans           &trans           &kp RET          &trans           &trans
