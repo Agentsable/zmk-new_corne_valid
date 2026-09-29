@@ -49,6 +49,16 @@
             bindings = <&soft_off>;
             key-positions = <1 15 29>;
         };
+
+        // Studio unlock also lives on layer 3, but layer 3 is only reachable
+        // from &mo 3 at position 47 -- on the RIGHT half. With the split link
+        // down the keyboard cannot be unlocked at all. These three are the
+        // left edge (Esc, LGui, LCtrl), so the central alone can always do it.
+        studio_unlock_combo {
+            bindings = <&studio_unlock>;
+            key-positions = <0 28 42>;
+            timeout-ms = <80>;
+        };
     };
 
     keymap {
