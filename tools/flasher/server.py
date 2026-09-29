@@ -545,7 +545,12 @@ class H(BaseHTTPRequestHandler):
             binding = keymap_mod.to_binding(body.get("text", ""))
             if not binding:
                 return self._send(200, {"ok": False, "error": "not a key I recognise"})
-            main, sub = keymap_mod.label(binding, {"fast": 0, "slow": 0})
+            try:
+                main, sub = keymap_mod.label(binding, {"fast": 0, "slow": 0})
+            except Exception as e:
+                return self._send(200, {"ok": False, "error": f"incomplete binding ({e})"})
+            if sub == "\u2026":
+                return self._send(200, {"ok": False, "error": "needs a parameter"})
             return self._send(200, {"ok": True, "binding": binding,
                                     "main": main, "sub": sub})
 

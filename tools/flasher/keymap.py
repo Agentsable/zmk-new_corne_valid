@@ -47,9 +47,20 @@ def kc(tok):
 
 
 def label(binding, speeds):
-    """One ZMK binding -> (main, sub) display lines."""
+    """One ZMK binding -> (main, sub) display lines.
+
+    Tolerates a binding that is missing its parameters. The live preview calls
+    this on every keystroke, so it sees "&kp" long before it sees "&kp A", and
+    an IndexError there took the whole endpoint down.
+    """
     p = binding.split()
+    if not p:
+        return ("", "")
     b = p[0]
+    need = {"&kp": 2, "&mo": 2, "&lt": 3, "&to": 2, "&tog": 2,
+            "&mkp": 2, "&mmv": 2, "&msc": 2}.get(b)
+    if need and len(p) < need:
+        return (b.lstrip("&"), "…")
     if b == "&kp":
         t = kc(p[1])
         return (t, "")
@@ -184,7 +195,17 @@ def to_binding(text):
     if not t:
         return None
     if t.startswith("&"):
-        return " ".join(t.split())
+        parts = t.split()
+        # The behaviour has to be one that exists, or a half-typed "&k" would
+        # be written into the keymap and fail the next build.
+        try:
+            import zmk_decode
+            known = zmk_decode.behaviors()
+        except Exception:
+            known = {}
+        if known and parts[0].lstrip("&") not in known:
+            return None
+        return " ".join(parts)
     if _INVERSE is None:
         _INVERSE = _inverse_display()
     if t in _INVERSE:

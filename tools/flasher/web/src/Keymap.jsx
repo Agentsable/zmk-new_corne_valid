@@ -51,7 +51,7 @@ export default function Keymap({ source, editable, onSaved }) {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
       }).then((r) => r.json()).then((j) => { if (live) setPreview(j); })
-        .catch(() => {});
+        .catch((e) => { if (live) setPreview({ ok: false, error: String(e) }); });
     }, 120);
     return () => { live = false; clearTimeout(id); };
   }, [draft]);
@@ -76,7 +76,13 @@ export default function Keymap({ source, editable, onSaved }) {
     // store what the server resolved, never the raw text -- typing "=" must
     // put &kp EQUAL in the keymap, not "="
     const binding = preview?.ok ? preview.binding : null;
-    if (!binding) return;
+    if (!binding) {
+      // never swallow this: a disabled button with no reason is what made the
+      // whole editor look like it silently did nothing
+      setErr(preview?.error || "That key could not be resolved — nothing applied.");
+      return;
+    }
+    setErr("");
     setEdits({ ...edits, [`${sel.layer}:${sel.index}`]: binding });
     setSel(null); setDraft(""); setPreview(null);
   };
