@@ -138,6 +138,7 @@ export default function Keymap({ source, editable, onSaved }) {
                      coord: coords[Number(index)]?.label };
           })}
           onAdd={save}
+          onSaved={() => { setEdits({}); load(); onSaved?.(); }}
           busy={busy}
           onDiscard={() => setEdits({})}
         />

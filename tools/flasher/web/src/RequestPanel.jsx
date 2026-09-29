@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from "react";
  * the board is actually missing -- the server decides that by comparing the
  * keymap against the last deploy, so the panel cannot disagree with reality.
  */
-export default function RequestPanel({ pending = [], onAdd, onDiscard, busy }) {
+export default function RequestPanel({ pending = [], onAdd, onDiscard, onSaved, busy }) {
   const [req, setReq] = useState(null);
   const [starting, setStarting] = useState(false);
   const [err, setErr] = useState("");
@@ -26,13 +26,47 @@ export default function RequestPanel({ pending = [], onAdd, onDiscard, busy }) {
 
   // The version name is built from the changes themselves, so a release is
   // named after what it contains rather than whatever someone typed.
+  // The name is the only record of what a release contained, so it carries the
+  // layer too -- without it a recovered request cannot be replayed. Truncation
+  // drops whole entries and says how many, rather than slicing one in half and
+  // losing a binding entirely.
   const parts = [];
   if (onDisk && req.request.description) parts.push(req.request.description);
-  for (const p of pending) parts.push(`${p.coord ?? p.index} ${p.binding.replace(/^&/, "")}`);
-  const name = parts.join(", ").slice(0, 90) || "keymap update";
+  for (const p of pending) {
+    parts.push(`${p.layer} ${p.coord ?? p.index} ${p.binding.replace(/^&/, "")}`);
+  }
+  let name = "";
+  let dropped = 0;
+  for (const part of parts) {
+    const next = name ? `${name}, ${part}` : part;
+    if (next.length > 80) { dropped += 1; continue; }
+    name = next;
+  }
+  if (dropped) name += ` +${dropped} more`;
+  name ||= "keymap update";
 
   const send = async () => {
     setStarting(true); setErr("");
+    // Write anything still in the browser FIRST. Deploying without this flashes
+    // whatever is on disk and silently discards the queued edits -- which is
+    // exactly what happened on 22:38: a release named after seven changes that
+    // contained none of them.
+    if (pending.length) {
+      const s = await fetch("/api/save", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          description: name,
+          edits: pending.map((p) => ({ layer: p.layer, index: p.index, binding: p.binding })),
+        }),
+      });
+      const sj = await s.json().catch(() => ({}));
+      if (!s.ok || sj.error) {
+        setStarting(false);
+        setErr(sj.error || "Could not write the changes; nothing was flashed.");
+        return;
+      }
+      onSaved?.();
+    }
     const r = await fetch("/api/start", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
