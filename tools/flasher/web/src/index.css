@@ -45,9 +45,6 @@ h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(-
 .side.green { background:rgba(62,207,142,.16); border-color:var(--green); }
 .side.green .side-status { color:var(--green); }
 
-.push { background:var(--green); color:#0b0d11; border:0; border-radius:10px; padding:13px;
-  font:inherit; font-weight:700; cursor:pointer; max-width:560px; }
-.push:disabled { opacity:.55; cursor:default; }
 .err { color:var(--red); margin:0; font-size:13px; }
 .ok { color:var(--green); margin:0; font-size:13px; }
 

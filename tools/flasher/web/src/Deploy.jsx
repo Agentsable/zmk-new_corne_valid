@@ -71,13 +71,6 @@ export default function Deploy() {
         </ol>
       )}
       {s.error && <p className="err">{s.error}</p>}
-      {s.phase === "done" && (
-        <button className="push" disabled={s.push === "ok"}
-          onClick={() => fetch("/api/push", { method: "POST" })}>
-          {s.push === "ok" ? "Pushed to git" : "Push update to git"}
-        </button>
-      )}
-      {s.push_msg && <p className={s.push === "ok" ? "ok" : "err"}>{s.push_msg}</p>}
     </div>
   );
 }

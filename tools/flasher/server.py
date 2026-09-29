@@ -34,7 +34,7 @@ SHIELDS = {"left": "eyelash_corne_left nice_oled", "right": "eyelash_corne_right
 
 LOCK = threading.Lock()
 STATE = {"phase": "idle", "left": "blank", "right": "blank", "log": [], "error": "",
-         "push": None, "push_msg": "", "version": None, "steps": []}
+         "version": None, "steps": []}
 
 # workflow steps, in order; the UI renders these with their status
 STEPS = [("predeploy", "Commit + push predeploy version"),
@@ -467,7 +467,7 @@ class H(BaseHTTPRequestHandler):
                 if STATE["phase"] not in ("idle", "error", "done"):
                     return self._send(409, {"error": "already running"})
                 STATE.update(phase="starting", left="blank", right="blank",
-                             log=[], error="", push=None, push_msg="")
+                             log=[], error="")
             name = ""
             try:
                 name = (json.loads(raw or b"{}") or {}).get("name", "")
@@ -502,21 +502,6 @@ class H(BaseHTTPRequestHandler):
                 ", ".join(f"{e.get('layer')}[{e.get('index')}]={e.get('binding')}"
                           for e in edits[:6]))
             return self._send(200, {"ok": True, "sha": st["pending"]["sha"]})
-        if self.path.startswith("/api/push"):
-            with LOCK:
-                if STATE["phase"] != "done":
-                    return self._send(409, {"error": "not finished"})
-            try:
-                r = subprocess.run(["git", "push", "origin", "main"], cwd=REPO,
-                                   capture_output=True, text=True, timeout=120)
-                out = (r.stdout + r.stderr).strip().splitlines()
-                msg = out[-1] if out else "pushed"
-                ok = r.returncode == 0
-            except Exception as e:
-                ok, msg = False, str(e)
-            setk(push="ok" if ok else "error", push_msg=msg)
-            log(f"git push: {msg}")
-            return self._send(200, {"ok": ok, "message": msg})
         self._send(404, {"error": "no route"})
 
 
