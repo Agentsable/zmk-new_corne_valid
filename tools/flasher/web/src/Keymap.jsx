@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { coordLabels } from "./coordLabels.js";
+import RequestPanel from "./RequestPanel.jsx";
 
 const U = 100, GAP = 8, PAD = 24;
 
@@ -38,6 +39,22 @@ export default function Keymap({ source, editable, onSaved }) {
   const [draft, setDraft] = useState("");
   const [desc, setDesc] = useState("");
   const [busy, setBusy] = useState(false);
+  // Whatever is typed is resolved server-side, so the preview and the saved
+  // binding come from one place. "=" and "&kp EQUAL" must not disagree.
+  const [preview, setPreview] = useState(null);
+  useEffect(() => {
+    const text = draft.trim();
+    if (!text) { setPreview(null); return; }
+    let live = true;
+    const id = setTimeout(() => {
+      fetch("/api/translate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      }).then((r) => r.json()).then((j) => { if (live) setPreview(j); })
+        .catch(() => {});
+    }, 120);
+    return () => { live = false; clearTimeout(id); };
+  }, [draft]);
 
   const load = useCallback(() => {
     fetch(`/api/keymap?src=${source}`)
@@ -56,9 +73,12 @@ export default function Keymap({ source, editable, onSaved }) {
   const nEdits = Object.keys(edits).length;
 
   const apply = () => {
-    if (!draft.trim()) return;
-    setEdits({ ...edits, [`${sel.layer}:${sel.index}`]: draft.trim() });
-    setSel(null); setDraft("");
+    // store what the server resolved, never the raw text -- typing "=" must
+    // put &kp EQUAL in the keymap, not "="
+    const binding = preview?.ok ? preview.binding : null;
+    if (!binding) return;
+    setEdits({ ...edits, [`${sel.layer}:${sel.index}`]: binding });
+    setSel(null); setDraft(""); setPreview(null);
   };
 
   const save = async () => {
@@ -89,22 +109,32 @@ export default function Keymap({ source, editable, onSaved }) {
           <span className="editwho">{sel.layer} · key {sel.index}</span>
           <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && apply()}
-            placeholder="ZMK binding, e.g. &kp A or &mkp LCLK" />
-          <button className="primary" onClick={apply}>Apply</button>
+            placeholder="a symbol like = or a binding like &kp A" />
+          {preview?.ok ? (
+            <span className="pv">
+              <code className="pv-bind">{preview.binding}</code>
+              <span className="pv-key">{preview.main}{preview.sub ? ` ${preview.sub}` : ""}</span>
+            </span>
+          ) : preview ? (
+            <span className="pv err">{preview.error}</span>
+          ) : null}
+          <button className="primary" onClick={apply}
+                  disabled={Boolean(draft.trim()) && !preview?.ok}>Apply</button>
           <button onClick={() => { setSel(null); setDraft(""); }}>Cancel</button>
         </div>
       )}
 
-      {editable && nEdits > 0 && (
-        <div className="savebar">
-          <span>{nEdits} unsaved change{nEdits > 1 ? "s" : ""}</span>
-          <input value={desc} onChange={(e) => setDesc(e.target.value)}
-            placeholder="Describe this update request" />
-          <button className="primary" disabled={busy} onClick={save}>
-            {busy ? "Saving…" : "Save & create request"}
-          </button>
-          <button onClick={() => setEdits({})}>Discard</button>
-        </div>
+      {editable && (
+        <RequestPanel
+          pending={Object.entries(edits).map(([k, binding]) => {
+            const [layer, index] = k.split(":");
+            return { layer, index: Number(index), binding,
+                     coord: coords[Number(index)]?.label };
+          })}
+          onAdd={save}
+          busy={busy}
+          onDiscard={() => setEdits({})}
+        />
       )}
 
       {d.layers.map((l) => (

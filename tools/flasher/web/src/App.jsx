@@ -88,7 +88,7 @@ export default function App() {
         )}
 
         {page === "pending" && (
-          <div className="page">
+          <div className="page haspanel">
             <h1>Update request</h1>
             {req?.open
               ? <RequestCard at={req.at} description={req.description} />

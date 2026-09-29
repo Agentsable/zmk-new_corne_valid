@@ -209,3 +209,31 @@ h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(-
   text-anchor:middle; dominant-baseline:middle; }
 .coords .clab.sp { font-size:24px; fill:var(--muted); }
 .srclink.plain { color:var(--muted); text-decoration:none; cursor:default; }
+
+/* --- update request panel --- */
+.reqpanel { position:fixed; top:0; right:0; width:290px; height:100vh; overflow-y:auto;
+  background:var(--side); border-left:1px solid var(--line); padding:20px 16px;
+  display:flex; flex-direction:column; gap:10px; z-index:5; }
+.reqpanel h2 { margin:0 0 4px; }
+.rp-head { font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); }
+.rp-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:5px; }
+.rp-list li { display:grid; grid-template-columns:auto 1fr; gap:3px 7px;
+  background:var(--panel); border:1px solid var(--line); border-radius:7px; padding:6px 8px; }
+.rp-coord { font:600 11px ui-monospace,Menlo,monospace; color:var(--blue); }
+.rp-layer { font-size:11px; color:var(--muted); }
+.rp-bind { grid-column:1/-1; font:11px ui-monospace,Menlo,monospace; color:var(--fg);
+  word-break:break-all; }
+.rp-desc { margin:0; font-size:12px; color:var(--fg); }
+.rp-actions { display:flex; gap:6px; }
+.rp-foot { margin-top:auto; display:flex; flex-direction:column; gap:7px;
+  border-top:1px solid var(--line); padding-top:12px; }
+.rp-name { font:11px ui-monospace,Menlo,monospace; color:var(--muted);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pv { display:flex; align-items:center; gap:8px; }
+.pv-bind { font:11px ui-monospace,Menlo,monospace; color:var(--muted); }
+.pv-key { display:inline-flex; align-items:center; justify-content:center; min-width:34px;
+  padding:4px 7px; background:var(--key); border:1px solid var(--keyline);
+  border-radius:5px; font:600 13px ui-monospace,Menlo,monospace; color:var(--fg); }
+.pv.err { color:var(--red); font-size:12px; }
+/* the editable page makes room for the panel */
+.page.haspanel { padding-right:310px; }

@@ -537,6 +537,18 @@ class H(BaseHTTPRequestHandler):
                 ", ".join(f"{e.get('layer')}[{e.get('index')}]={e.get('binding')}"
                           for e in edits[:6]))
             return self._send(200, {"ok": True, "sha": st["pending"]["sha"]})
+        if self.path.startswith("/api/translate"):
+            try:
+                body = json.loads(raw or b"{}")
+            except Exception:
+                body = {}
+            binding = keymap_mod.to_binding(body.get("text", ""))
+            if not binding:
+                return self._send(200, {"ok": False, "error": "not a key I recognise"})
+            main, sub = keymap_mod.label(binding, {"fast": 0, "slow": 0})
+            return self._send(200, {"ok": True, "binding": binding,
+                                    "main": main, "sub": sub})
+
         if self.path.startswith("/api/zmk/"):
             # Imported here, not at module scope: deploy.py runs on the system
             # interpreter, which has no protobuf. Flashing must not depend on

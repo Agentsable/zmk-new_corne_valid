@@ -148,3 +148,55 @@ def parse(text, repo):
     # rc is the shield's own matrix (row, col); the coordinates view needs the
     # row from it rather than guessing from y, which column stagger makes unreliable.
     return {"layers": layers, "speeds": speeds, "layout": LAYOUT, "rc": geo["rc"]}
+
+
+def _inverse_display():
+    """Rendered text -> the keycode that produces it.
+
+    Built by inverting the same BASIC and SHIFTED tables label() renders with,
+    so what you can type is exactly what the board can show. First spelling
+    wins, which keeps the common one ("=" -> EQUAL, not KP_EQUAL).
+    """
+    inv = {}
+    # Keypad spellings last: "+" should mean shifted-equals on a 40% board, not
+    # KP_PLUS, and "*" should mean LS(N8). They still resolve, just not first.
+    for name, disp in BASIC.items():
+        if not name.startswith("KP_"):
+            inv.setdefault(disp, name)
+    for name, disp in SHIFTED.items():
+        inv.setdefault(disp, f"LS({name})")
+    for name, disp in BASIC.items():
+        inv.setdefault(disp, name)
+    return inv
+
+
+_INVERSE = None
+
+
+def to_binding(text):
+    """Free text -> a ZMK binding, or None if it cannot be resolved.
+
+    Accepts what a person would actually type: a full binding, a rendered
+    symbol, a bare keycode name, or a single letter or digit.
+    """
+    global _INVERSE
+    t = (text or "").strip()
+    if not t:
+        return None
+    if t.startswith("&"):
+        return " ".join(t.split())
+    if _INVERSE is None:
+        _INVERSE = _inverse_display()
+    if t in _INVERSE:
+        return f"&kp {_INVERSE[t]}"
+    if len(t) == 1 and t.isalpha():
+        return f"&kp {t.upper()}"
+    if len(t) == 1 and t.isdigit():
+        return f"&kp N{t}"
+    try:
+        import zmk_decode
+        if zmk_decode.encode_keycode(t.upper()) is not None:
+            return f"&kp {t.upper()}"
+    except Exception:
+        pass
+    return None

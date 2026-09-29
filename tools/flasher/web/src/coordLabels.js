@@ -35,6 +35,6 @@ export function coordLabels(layout, rc, keys) {
 
   return layout.map((_, i) => {
     const sp = special(i);
-    return { label: sp ?? `${half(i)}${rc[i][0]}-${col[i]}`, special: Boolean(sp) };
+    return { label: sp ?? `${half(i)}${rc[i][0]}${col[i]}`, special: Boolean(sp) };
   });
 }
