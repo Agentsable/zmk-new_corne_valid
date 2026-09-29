@@ -145,4 +145,6 @@ def parse(text, repo):
             keys.append({"main": main, "sub": sub, "binding": t,
                          "joy": JOYSTICK.get(i), "rotary": i == ROTARY})
         layers.append({"name": name, "keys": keys, "line": line_no})
-    return {"layers": layers, "speeds": speeds, "layout": LAYOUT}
+    # rc is the shield's own matrix (row, col); the coordinates view needs the
+    # row from it rather than guessing from y, which column stagger makes unreliable.
+    return {"layers": layers, "speeds": speeds, "layout": LAYOUT, "rc": geo["rc"]}

@@ -5,6 +5,7 @@ import Keymap from "./Keymap.jsx";
 import RequestCard from "./Request.jsx";
 import Verify from "./Verify.jsx";
 import Workflow from "./Workflow.jsx";
+import Coords from "./Coords.jsx";
 import ZmkUpdate from "./ZmkUpdate.jsx";
 
 const NAV = [
@@ -12,12 +13,24 @@ const NAV = [
   { id: "current", label: "Current keymap" },
   { id: "pending", label: "Update request" },
   { id: "workflow", label: "Deployment workflow" },
+  { id: "coords", label: "Key coordinates" },
   { id: "zmk", label: "ZMK update" },
   { id: "verify", label: "Source verification" },
 ];
 
 export default function App() {
-  const [page, setPage] = useState("deploy");
+  // hash routing: pages become linkable, which also makes them reachable by a
+  // headless browser for screenshots instead of needing a human to click.
+  const [page, setPage] = useState(
+    () => NAV.find((n) => n.id === location.hash.slice(1))?.id ?? "deploy");
+  useEffect(() => {
+    const onHash = () => {
+      const id = NAV.find((n) => n.id === location.hash.slice(1))?.id;
+      if (id) setPage(id);
+    };
+    addEventListener("hashchange", onHash);
+    return () => removeEventListener("hashchange", onHash);
+  }, []);
   const [req, setReq] = useState(null);
   const [perm, setPerm] = useState(permission());
   const prevState = useRef(null);
@@ -42,7 +55,7 @@ export default function App() {
         <nav>
           {NAV.map((n) => (
             <button key={n.id} className={page === n.id ? "on" : ""}
-              onClick={() => setPage(n.id)}>
+              onClick={() => { setPage(n.id); location.hash = n.id; }}>
               {n.label}
               {n.id === "pending" && req?.open && <span className="dot" />}
             </button>
@@ -60,6 +73,7 @@ export default function App() {
         {page === "deploy" && <Deploy />}
         {page === "verify" && <Verify />}
         {page === "workflow" && <Workflow />}
+        {page === "coords" && <Coords />}
         {page === "zmk" && <ZmkUpdate />}
 
         {page === "current" && (
