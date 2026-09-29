@@ -1,0 +1,25 @@
+#!/bin/sh
+# Keep the hosted flasher in step with the repo.
+#
+# Cloudflare Workers Builds would be the server-side way to do this, but it
+# needs their GitHub App installed from the dashboard. Until that is connected,
+# this hook is what actually keeps keys.hyperdev.app current -- and this repo is
+# only ever pushed from this Mac, so in practice it covers every push.
+#
+# Only fires when the hosted app's own sources changed, so a keymap-only push
+# does not pay for a rebuild.
+set -e
+ROOT=$(git rev-parse --show-toplevel)
+CHANGED=$(git diff --name-only @{push}..HEAD 2>/dev/null || git diff --name-only HEAD~1..HEAD)
+echo "$CHANGED" | grep -qE '^tools/flasher/(web|worker)/' || exit 0
+
+echo "pre-push: hosted flasher sources changed, deploying"
+TOKEN=$(grep -m1 '^CLOUDFLARE_API_TOKEN=' /Users/yigalweinberger/Documents/Code/shared.env | cut -d= -f2-)
+[ -n "$TOKEN" ] || { echo "pre-push: no CLOUDFLARE_API_TOKEN, skipping deploy"; exit 0; }
+
+cd "$ROOT/tools/flasher/web" && npm run build >/dev/null
+cd "$ROOT/tools/flasher/worker"
+CLOUDFLARE_API_TOKEN="$TOKEN" \
+CLOUDFLARE_ACCOUNT_ID=be27a3790e3187d548ccdef0217c461b \
+  npx --yes wrangler@4 deploy 2>&1 | grep -E "Deployed|Version ID" || {
+    echo "pre-push: deploy FAILED -- push continues, hosted app is now behind"; exit 0; }

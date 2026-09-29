@@ -1,0 +1,11 @@
+#!/bin/sh
+# Delegate to the machine-wide secret scanner.
+#
+# This repo sets core.hooksPath to .githooks so that pre-push can deploy the
+# hosted flasher. That override replaces the global hooks directory wholesale,
+# which would silently switch off ~/.config/git/hooks/pre-commit -- the scanner
+# added after a live key was committed. On a public repo that is the last thing
+# to lose, so it is chained explicitly rather than inherited.
+GLOBAL="${HOME}/.config/git/hooks/pre-commit"
+[ -x "$GLOBAL" ] && exec "$GLOBAL" "$@"
+exit 0
