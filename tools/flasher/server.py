@@ -8,7 +8,7 @@ when both are green the commit can be pushed.
 Flashing shells out to adafruit-nrfutil: the Nordic legacy DFU protocol is not
 worth reimplementing just to reach it from a browser.
 """
-import hashlib, hmac, json, os, re, subprocess, threading, time
+import base64, hashlib, hmac, json, os, re, subprocess, threading, time
 
 import keymap as keymap_mod
 import verify as verify_mod
@@ -178,6 +178,23 @@ def remote_secret():
         return open(REMOTE_SECRET_FILE).read().strip()
     except OSError:
         return ""
+
+
+HOSTED_SECRETS_FILE = os.path.join(ROOT, ".hosted-secrets.json")
+
+
+def basic_credentials():
+    """(user, password) for browsers reaching this server over the tunnel.
+
+    The same pair the hosted Worker uses, so there is one login to remember
+    rather than two. Absent on a machine that never hosts, where browser access
+    over the tunnel is simply refused.
+    """
+    try:
+        d = json.load(open(HOSTED_SECRETS_FILE))
+        return d.get("basic_user", ""), d.get("basic_pass", "")
+    except Exception:
+        return "", ""
 STATE_FILE = os.path.join(ROOT, "state.json")
 
 
@@ -487,12 +504,42 @@ class H(BaseHTTPRequestHandler):
         """
         if not self.headers.get("Cf-Ray"):
             return True
+
+        # The Worker's way in: a shared secret no browser can be made to send.
         want = remote_secret()
         got = self.headers.get("X-Flasher-Secret", "")
         if want and hmac.compare_digest(want, got):
             return True
-        log(f"refused remote request to {self.path.split('?')[0]} (bad or missing secret)")
-        self._send(403, {"error": "not authorised"})
+
+        # A person's way in: the same credentials the hosted app uses, so this
+        # host is usable directly in a browser rather than only as plumbing.
+        user, pw = basic_credentials()
+        if user and pw:
+            auth = self.headers.get("Authorization", "")
+            if auth.startswith("Basic "):
+                try:
+                    given = base64.b64decode(auth[6:]).decode("utf-8", "replace")
+                except Exception:
+                    given = ""
+                if hmac.compare_digest(f"{user}:{pw}", given):
+                    return True
+
+        path = self.path.split("?")[0]
+        log(f"refused remote request to {path} (no secret, no valid sign-in)")
+        # Challenge only on a navigation. On an API route a browser would answer
+        # WWW-Authenticate with a native dialog, and a fetch behind that dialog
+        # never settles -- the page would hang rather than report the problem.
+        if path.startswith("/api/"):
+            self._send(401, {"kind": "auth", "error": "Sign in to reach the flasher."})
+        else:
+            body = b"Sign in to reach the flasher.\n"
+            self.send_response(401)
+            self.send_header("WWW-Authenticate",
+                             'Basic realm="Eyelash Corne flasher", charset="UTF-8"')
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         return False
 
     def do_GET(self):
@@ -560,10 +607,17 @@ class H(BaseHTTPRequestHandler):
             # the stale cached tab this guard exists to catch -- a marker is
             # enough there, while local tabs keep the strict hash check.
             supplied = body.get("build", "")
-            if self.headers.get("Cf-Ray"):
+            cur = current_build()
+            if supplied and cur and supplied == cur:
+                # Served by this server, so the hash is authoritative wherever
+                # the request came from -- including a browser on the tunnel
+                # hostname, which carries Cf-Ray but is not the hosted UI.
+                stale = False
+            elif self.headers.get("Cf-Ray"):
+                # The hosted UI, rebuilt from git on every push, so it cannot be
+                # the stale cached tab this guard exists to catch.
                 stale = not supplied.startswith("remote:")
             else:
-                cur = current_build()
                 stale = bool(cur) and supplied != cur
             if stale:
                 return self._send(409, {"error":
