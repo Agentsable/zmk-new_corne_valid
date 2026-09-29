@@ -79,9 +79,9 @@
         layer_1 {
             display-name = "NAV";
             bindings = <
-  &kp TAB            &kp LC(LALT)       &kp LC(LGUI)       &kp LG(LALT)       &kp LS(LG(UP))     &kp LS(LG(DOWN))   &mmv SLOW_UP       &kp N1             &kp HOME           &kp PG_DN          &kp PG_UP          &kp END            &kp EQUAL
-  &kp TAB            &kp LCTRL          &kp LGUI           &kp LALT           &kp LS(LG(LEFT))   &kp LS(LG(RIGHT))  &mmv SLOW_LEFT     &trans             &mmv SLOW_RIGHT    &kp LS(SEMI)       &kp LEFT           &kp DOWN           &kp UP             &kp RIGHT          &kp MINUS
-  &kp RSHFT          &kp LG(Z)          &kp LG(X)          &kp LG(C)          &kp LG(V)          &kp LG(Y)          &trans             &mmv SLOW_DOWN     &kp FSLH           &kp LBKT           &kp LS(MINUS)      &kp LS(EQUAL)      &kp RBKT           &kp RSHFT
+  &kp TAB            &kp LC(LALT)       &kp LC(LGUI)       &kp LG(LALT)       &kp LS(LG(UP))     &kp LS(LG(DOWN))   &mmv SLOW_UP       &kp GRAVE          &kp HOME           &kp PG_DN          &kp PG_UP          &kp END            &kp LS(EQUAL)
+  &kp TAB            &kp LCTRL          &kp LGUI           &kp LALT           &kp LS(LG(LEFT))   &kp LS(LG(RIGHT))  &mmv SLOW_LEFT     &trans             &mmv SLOW_RIGHT    &kp LS(SEMI)       &kp LEFT           &kp DOWN           &kp UP             &kp RIGHT          &kp EQUAL
+  &kp RSHFT          &kp LG(Z)          &kp LG(X)          &kp LG(C)          &kp LG(V)          &kp LG(Y)          &trans             &mmv SLOW_DOWN     &kp FSLH           &kp FSLH           &kp LS(MINUS)      &kp MINUS          &kp BSLH           &kp RSHFT
   &kp LG(SPACE)      &kp RSHFT          &kp LALT           &kp RSHFT          &kp TAB            &trans
             >;
 
