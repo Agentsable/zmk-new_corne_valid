@@ -5,12 +5,14 @@ import Keymap from "./Keymap.jsx";
 import RequestCard from "./Request.jsx";
 import Verify from "./Verify.jsx";
 import Workflow from "./Workflow.jsx";
+import ZmkUpdate from "./ZmkUpdate.jsx";
 
 const NAV = [
   { id: "deploy", label: "Firmware update" },
   { id: "current", label: "Current keymap" },
   { id: "pending", label: "Update request" },
   { id: "workflow", label: "Deployment workflow" },
+  { id: "zmk", label: "ZMK update" },
   { id: "verify", label: "Source verification" },
 ];
 
@@ -58,6 +60,7 @@ export default function App() {
         {page === "deploy" && <Deploy />}
         {page === "verify" && <Verify />}
         {page === "workflow" && <Workflow />}
+        {page === "zmk" && <ZmkUpdate />}
 
         {page === "current" && (
           <div className="page">

@@ -502,6 +502,28 @@ class H(BaseHTTPRequestHandler):
                 ", ".join(f"{e.get('layer')}[{e.get('index')}]={e.get('binding')}"
                           for e in edits[:6]))
             return self._send(200, {"ok": True, "sha": st["pending"]["sha"]})
+        if self.path.startswith("/api/zmk/read"):
+            # Imported here, not at module scope: deploy.py runs on the system
+            # interpreter, which has no protobuf. Flashing must not depend on
+            # this page being usable.
+            try:
+                import zmk_rpc
+            except ImportError as e:
+                return self._send(503, {"kind": "no_deps", "error":
+                    f"ZMK RPC deps missing ({e}). Recreate .venv via run.sh."})
+            port = (ports() or [None])[0]   # ports() is live; STATE has no "ports" key
+            if not port:
+                return self._send(409, {"kind": "no_port",
+                                        "error": "No keyboard serial port detected."})
+            try:
+                km = zmk_rpc.read_keymap("/dev/" + port)
+            except zmk_rpc.RpcError as e:
+                return self._send(409, {"kind": e.kind, "error": str(e)})
+            except Exception as e:
+                return self._send(500, {"kind": "failed", "error": str(e)})
+            from google.protobuf.json_format import MessageToDict
+            return self._send(200, {"ok": True,
+                                    "keymap": MessageToDict(km, preserving_proto_field_name=True)})
         self._send(404, {"error": "no route"})
 
 

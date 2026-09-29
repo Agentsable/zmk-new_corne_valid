@@ -11,9 +11,11 @@ export NRFUTIL="${NRFUTIL:-$PWD/$VENV/bin/adafruit-nrfutil}"
 if [ ! -x "$NRFUTIL" ]; then
   echo "setting up $VENV (first run)…"
   python3 -m venv "$VENV"
-  "$VENV/bin/pip" install -q adafruit-nrfutil
+  # protobuf is for the ZMK update page (zmk_rpc + zmk_proto). Its version must
+  # be >= the gencode in zmk_proto/, or the generated modules refuse to load.
+  "$VENV/bin/pip" install -q adafruit-nrfutil 'protobuf>=7.36'
 fi
 mkdir -p "$PKG_DIR"
 
-nohup python3 server.py >> server.log 2>&1 &
+nohup "$VENV/bin/python" server.py >> server.log 2>&1 &
 echo "flasher pid $! — http://127.0.0.1:8787"
