@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { coordLabels } from "./coordLabels.js";
 
 const U = 100, GAP = 8, PAD = 24;
 
@@ -79,6 +80,8 @@ export default function Keymap({ source, editable, onSaved }) {
     setEdits({}); setDesc(""); load(); onSaved?.();
   };
 
+  const coords = coordLabels(d.layout, d.rc, d.layers[0]?.keys ?? []);
+
   return (
     <>
       {editable && sel && (
@@ -125,6 +128,25 @@ export default function Keymap({ source, editable, onSaved }) {
           </svg>
         </section>
       ))}
+
+      {/* A reference board under the real layers: same geometry, same key
+          shapes, but labelled by coordinate instead of binding. Not a ZMK
+          layer -- it is how to name a key when asking for a change. */}
+      <section className="card">
+        <h2>Key coordinates</h2>
+        <span className="srclink plain">half · matrix row · column within that half</span>
+        <svg className="board" viewBox={`${-PAD} ${-PAD} ${maxX + PAD * 2} ${maxY + PAD}`}>
+          {d.layout.map((pos, i) => {
+            const c = coords[i];
+            const k = d.layers[0]?.keys?.[i] ?? {};
+            return (
+              <Key key={i} pos={pos}
+                   k={{ main: c?.label ?? "", sub: String(i),
+                        joy: k.joy, rotary: k.rotary }} />
+            );
+          })}
+        </svg>
+      </section>
     </>
   );
 }

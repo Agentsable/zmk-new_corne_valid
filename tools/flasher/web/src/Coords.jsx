@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { coordLabels } from "./coordLabels.js";
 
 /** A reference card: every key labelled by half, row and column.
  *
@@ -24,29 +25,7 @@ export default function Coords() {
   const split = (Math.min(...xs) + Math.max(...xs)) / 2;
   const half = (i) => (layout[i][0] < split ? "L" : "R");
 
-  // The joystick and rotary share matrix rows with ordinary keys, so counting
-  // them as columns shifts every alpha along: the right half would start at
-  // R0-1, and joystick-right would sort ahead of the right thumbs. They get
-  // names instead, and the grid is numbered without them.
-  const JOY = { up: "JOY↑", down: "JOY↓", left: "JOY←", right: "JOY→", centre: "JOY•" };
-  const special = (i) => {
-    const k = keys[i] ?? {};
-    if (k.rotary) return "ROT";
-    if (k.joy) return JOY[k.joy] ?? "JOY";
-    return null;
-  };
-
-  const col = {};
-  const buckets = {};
-  layout.forEach((_, i) => {
-    if (special(i)) return;
-    const k = `${half(i)}${rc[i][0]}`;
-    (buckets[k] ??= []).push(i);
-  });
-  Object.values(buckets).forEach((list) => {
-    list.sort((a, b) => layout[a][0] - layout[b][0]);
-    list.forEach((i, n) => { col[i] = n; });
-  });
+  const labels = coordLabels(layout, rc, keys);
 
   const W = 100, H = 100, PAD = 20;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -80,9 +59,9 @@ export default function Coords() {
             return (
               <g key={i} transform={rot}>
                 <rect className={cls} x={x + 2} y={y + 2} width={W - 4} height={H - 4} rx={12} />
-                <text className={"clab" + (special(i) ? " sp" : "")}
+                <text className={"clab" + (labels[i].special ? " sp" : "")}
                       x={x + W / 2} y={y + H / 2 - 4}>
-                  {special(i) ?? `${half(i)}${rc[i][0]}-${col[i]}`}
+                  {labels[i].label}
                 </text>
                 <text className="cpos" x={x + W / 2} y={y + H / 2 + 26}>{i}</text>
               </g>

@@ -208,3 +208,4 @@ h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(-
 .coords .cpos { fill:var(--muted); font:400 22px ui-monospace,SFMono-Regular,Menlo,monospace;
   text-anchor:middle; dominant-baseline:middle; }
 .coords .clab.sp { font-size:24px; fill:var(--muted); }
+.srclink.plain { color:var(--muted); text-decoration:none; cursor:default; }
