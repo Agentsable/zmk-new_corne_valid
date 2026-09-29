@@ -76,10 +76,18 @@ def build_halves():
         # USB CDC/console to the peripheral and made local right-half firmware
         # 6.6 KB larger than CI's for no reason.
         snippet = "-S studio-rpc-usb-uart " if side == "left" else ""
+        # build.yaml passes these in CI, and this build passed nothing, so every
+        # locally flashed board came out with Studio locking ON while the repo
+        # said it was off. Locking is also self-defeating here: it re-locks on
+        # every disconnect, and the unlock behaviour sits behind a layer only
+        # the peripheral can reach.
+        studio = ("-DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_STUDIO_LOCKING=n "
+                  if side == "left" else "")
         script.append(
             f'west build -s zmk/app -b nice_nano_v2 -d build/{side}_nice '
             f'{snippet}--pristine=never -- '
             f'-DSHIELD="{shield}" -DZMK_CONFIG=/workspace/config '
+            f'{studio}'
             f'-DEXTRA_DTC_OVERLAY_FILE={OVERLAY}')
         script.append(f'echo BUILT {side}')
     cmd = ["docker", "run", "--rm", "-v", f"{REPO}:/workspace", "-w", "/workspace",
