@@ -195,3 +195,6 @@ h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(-
 .side.red .mini .mk { stroke:var(--red); }
 .side.orange .mini .mk { stroke:var(--orange); }
 .side.green .mini .mk { stroke:var(--green); }
+.zlegend { display:flex; align-items:center; gap:8px; flex-wrap:wrap; color:var(--muted);
+  font-size:12px; margin:0; max-width:860px; }
+.zlegend .zkey { cursor:default; }

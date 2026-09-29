@@ -20,7 +20,9 @@ function Key({ k, side, onPick, picked }) {
     <button
       className={`zkey ${mark} ${picked ? "picked" : ""}`}
       disabled={!live}
-      title={live ? `${k.source}  →  ${k.board}` : text}
+      title={k.unknown
+        ? `${k.source} — the board reports a value its metadata gives no name for, so it cannot be compared`
+        : live ? `${k.source}  →  ${k.board}` : text}
       onClick={() => live && onPick(k)}
     >
       {text.replace(/^&/, "")}
@@ -117,6 +119,16 @@ export default function ZmkUpdate() {
           </span>
         )}
       </div>
+
+      {layers && (
+        <p className="zlegend">
+          <span className="zkey was">was</span> source
+          <span className="zkey now">now</span> board
+          <span className="zkey unknown">—</span>
+          unnameable: the joystick keys send a packed value the device metadata
+          gives no name for, so they cannot be compared either way. Not a difference.
+        </p>
+      )}
 
       {err && (
         <div className="card">

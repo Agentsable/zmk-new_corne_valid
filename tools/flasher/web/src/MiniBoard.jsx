@@ -19,10 +19,25 @@ export default function MiniBoard({ side, geo }) {
   if (!idx.length) return <svg className="mini" viewBox="0 0 10 10" />;
 
   const W = 100, H = 100;   // analyse() reports uniform 100x100 units
-  const minX = Math.min(...idx.map((i) => layout[i][0]));
-  const minY = Math.min(...idx.map((i) => layout[i][1]));
-  const maxX = Math.max(...idx.map((i) => layout[i][0])) + W;
-  const maxY = Math.max(...idx.map((i) => layout[i][1])) + H;
+
+  // The thumb keys are rotated, and a rotated rect reaches past the box its
+  // unrotated x/y describe. Measuring the corners after rotation is what stops
+  // the outer thumb being sliced off by the viewBox.
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const i of idx) {
+    const [x, y, r, rx, ry] = layout[i];
+    const a = ((r || 0) / 100) * (Math.PI / 180);
+    const cos = Math.cos(a), sin = Math.sin(a);
+    for (const [px, py] of [[x, y], [x + W, y], [x, y + H], [x + W, y + H]]) {
+      const dx = px - rx, dy = py - ry;
+      const qx = r ? rx + dx * cos - dy * sin : px;
+      const qy = r ? ry + dx * sin + dy * cos : py;
+      if (qx < minX) minX = qx;
+      if (qy < minY) minY = qy;
+      if (qx > maxX) maxX = qx;
+      if (qy > maxY) maxY = qy;
+    }
+  }
 
   return (
     <svg
