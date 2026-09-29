@@ -62,6 +62,9 @@ def _resolve(expr, seen=()):
         if page is None or usage is None:
             return None
         return (page << 16) | usage
+    m = re.fullmatch(r"BIT\s*\(\s*(\d+)\s*\)", e)
+    if m:
+        return 1 << int(m.group(1))
     if re.fullmatch(r"0[xX][0-9a-fA-F]+", e):
         return int(e, 16)
     if re.fullmatch(r"\d+", e):
@@ -81,6 +84,38 @@ def _balanced(s):
         if d < 0:
             return False
     return d == 0
+
+
+@functools.lru_cache(maxsize=1)
+def constants():
+    """name -> int for non-keycode binding params, e.g. mouse buttons.
+
+    &mkp takes LCLK, which pointing.h defines as MB1, which is BIT(0). The
+    device reports whichever spelling its metadata carries, so both have to
+    resolve to the same number or one key reads as an edit nobody made.
+    """
+    out = {}
+    for name, expr in _defines("pointing.h").items():
+        v = _resolve_pointing(name, expr)
+        if v is not None:
+            out[name] = v
+    return out
+
+
+def _resolve_pointing(name, expr, seen=()):
+    e = expr.strip()
+    while e.startswith("(") and e.endswith(")") and _balanced(e[1:-1]):
+        e = e[1:-1].strip()
+    m = re.fullmatch(r"BIT\s*\(\s*(\d+)\s*\)", e)
+    if m:
+        return 1 << int(m.group(1))
+    if re.fullmatch(r"\d+", e):
+        return int(e)
+    if re.fullmatch(r"[A-Za-z_]\w*", e) and e not in seen:
+        nxt = _defines("pointing.h").get(e)
+        if nxt is not None:
+            return _resolve_pointing(e, nxt, seen + (e,))
+    return None
 
 
 @functools.lru_cache(maxsize=1)

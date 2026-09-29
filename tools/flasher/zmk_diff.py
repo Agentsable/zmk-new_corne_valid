@@ -74,6 +74,10 @@ def _canon(text):
     for tok in toks[1:]:
         v = zmk_decode.encode_keycode(tok)
         if v is None:
+            # non-keycode params: mouse buttons and friends, where LCLK and MB1
+            # are one value under two names, exactly like RCTRL and RCTL
+            v = zmk_decode.constants().get(tok)
+        if v is None:
             v = int(tok) if tok.lstrip("-").isdigit() else tok
         vals.append(v)
     return (toks[0].lstrip("&"), tuple(vals))
