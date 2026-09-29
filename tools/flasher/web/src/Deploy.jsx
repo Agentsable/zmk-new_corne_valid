@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import MiniBoard from "./MiniBoard.jsx";
 
 const LABEL = {
   blank: "not started",
@@ -7,10 +8,11 @@ const LABEL = {
   green: "flashed",
 };
 
-function Side({ name, status, order }) {
+function Side({ name, status, order, side, geo }) {
   return (
     <div className={"side " + status}>
       <span className="side-name">{name}<span className="order">{order}</span></span>
+      <MiniBoard side={side} geo={geo} />
       <span className="side-status">{LABEL[status]}</span>
     </div>
   );
@@ -19,6 +21,13 @@ function Side({ name, status, order }) {
 export default function Deploy() {
   const [s, setS] = useState(null);
   const [name, setName] = useState("");
+  const [geo, setGeo] = useState(null);
+  useEffect(() => {
+    // layout plus the joystick/rotary flags, for the per-half diagrams
+    fetch("/api/keymap").then((r) => r.json())
+      .then((j) => setGeo({ layout: j.layout, keys: j.layers?.[0]?.keys ?? [] }))
+      .catch(() => {});
+  }, []);
   useEffect(() => {
     const tick = async () => { try { setS(await (await fetch("/api/state")).json()); } catch {} };
     tick();
@@ -50,8 +59,8 @@ export default function Deploy() {
       </button>
 
       <div className="sides">
-        <Side name="Right" status={s.right} order="1st" />
-        <Side name="Left" status={s.left} order="2nd" />
+        <Side name="Left" status={s.left} order="2nd" side="left" geo={geo} />
+        <Side name="Right" status={s.right} order="1st" side="right" geo={geo} />
       </div>
 
       {s.version && (

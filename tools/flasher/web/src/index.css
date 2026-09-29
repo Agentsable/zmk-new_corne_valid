@@ -186,3 +186,12 @@ h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(-
 .zkey.picked { outline:2px solid var(--blue); outline-offset:1px; }
 .zdecide { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .sdetail.ok { color:var(--green); }
+
+/* --- per-half mini diagrams on the firmware update page --- */
+.mini { width:100%; max-width:190px; height:auto; display:block; margin:10px 0 4px; }
+.mini .mk { fill:var(--key); stroke:var(--keyline); stroke-width:4; }
+.mini .mk.joy { fill:rgba(91,157,255,.30); stroke:var(--blue); }
+.mini .mk.rot { fill:rgba(255,166,43,.22); stroke:var(--orange); stroke-width:5; }
+.side.red .mini .mk { stroke:var(--red); }
+.side.orange .mini .mk { stroke:var(--orange); }
+.side.green .mini .mk { stroke:var(--green); }
