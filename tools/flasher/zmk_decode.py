@@ -152,6 +152,22 @@ def encode_keycode(text):
     return keycodes().get(t)
 
 
+def known_keycode(text):
+    """True when ZMK's headers define this keycode spelling, so dtc compiles it.
+
+    Deliberately not encode_keycode(): that answers "which integer is this" and
+    returns None for EXCL -- a real keycode defined as LS(N1), with no HID usage
+    of its own. The only question here is whether the build will accept it.
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    m = re.fullmatch(r"([A-Z]{2})\s*\((.*)\)", t)
+    if m and m.group(1) in MOD_FUNCS:
+        return known_keycode(m.group(2))
+    return t in _raw()
+
+
 def decode_keycode(value):
     """int -> `LS(N1)`, or None if the base usage is not one we know."""
     mods, base = (value >> 24) & 0xFF, value & 0x00FFFFFF

@@ -122,7 +122,11 @@ def set_bindings(text, edits):
         idx = int(e["index"])
         if not 0 <= idx < 48:
             raise ValueError(f"index {idx} out of range")
-        flat[idx] = e["binding"].strip()
+        binding = e["binding"].strip()
+        bad = why_invalid(binding)
+        if bad:
+            raise ValueError(f"{e['layer']}[{idx}]: {bad}")
+        flat[idx] = binding
         width = max(len(t) for t in flat) + 2
         out, i = [], 0
         for n in ROWS:
@@ -184,6 +188,37 @@ def _inverse_display():
 _INVERSE = None
 
 
+def why_invalid(binding):
+    """None when ZMK will compile this binding, else a sentence saying why not.
+
+    Both the live preview and the write path ask this, so what the editor
+    refuses and what can reach the keymap cannot drift apart.
+
+    ponytail: only &kp's parameter is checked. It is what clicking a key writes
+    and the only keycode parameter this keymap uses; widen to the trailing
+    parameter of &lt/&mt/&sk if those ever get typed by hand.
+    """
+    parts = (binding or "").split()
+    if not parts:
+        return "empty binding"
+    try:
+        import zmk_decode
+    except Exception:
+        return None          # no ZMK checkout to check against; do not block
+    known = zmk_decode.behaviors()
+    name = parts[0].lstrip("&")
+    if known and name not in known:
+        return f"no behaviour called &{name}"
+    if name == "kp":
+        if len(parts) != 2:
+            return "&kp takes exactly one keycode"
+        if not zmk_decode.known_keycode(parts[1]):
+            # Left unchecked this reaches the keymap, and workflow() pushes the
+            # predeploy tag before it builds -- so the break lands on main first.
+            return f"{parts[1]} is not a keycode ZMK defines"
+    return None
+
+
 def to_binding(text):
     """Free text -> a ZMK binding, or None if it cannot be resolved.
 
@@ -195,17 +230,8 @@ def to_binding(text):
     if not t:
         return None
     if t.startswith("&"):
-        parts = t.split()
-        # The behaviour has to be one that exists, or a half-typed "&k" would
-        # be written into the keymap and fail the next build.
-        try:
-            import zmk_decode
-            known = zmk_decode.behaviors()
-        except Exception:
-            known = {}
-        if known and parts[0].lstrip("&") not in known:
-            return None
-        return " ".join(parts)
+        binding = " ".join(t.split())
+        return None if why_invalid(binding) else binding
     if _INVERSE is None:
         _INVERSE = _inverse_display()
     if t in _INVERSE:
