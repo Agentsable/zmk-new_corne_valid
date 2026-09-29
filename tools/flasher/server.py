@@ -191,11 +191,21 @@ def repo_url():
 
 
 def head_subject():
-    try:
-        return subprocess.run(["git", "log", "-1", "--format=%s"], cwd=REPO,
-                              capture_output=True, text=True, timeout=5).stdout.strip()
-    except Exception:
-        return ""
+    """Subject of the last commit that touched the keymap.
+
+    Not HEAD. A pending request describes a keymap change, and any number of
+    commits to the flasher or the docs can land on top of it -- reporting HEAD
+    then labels the request with something that changed no keys at all.
+    """
+    for args in (["log", "-1", "--format=%s", "--", KEYMAP], ["log", "-1", "--format=%s"]):
+        try:
+            out = subprocess.run(["git", *args], cwd=REPO, capture_output=True,
+                                 text=True, timeout=5).stdout.strip()
+        except Exception:
+            return ""
+        if out:
+            return out
+    return ""
 
 
 def request_info():
