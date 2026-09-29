@@ -285,7 +285,24 @@ def flash_half(side):
         return False
     setk(**{side: "orange"}, phase=f"{side}_flash")
     log(f"{side}: bootloader on /dev/{port}")
-    if not flash(side, port):
+    # The volume mounts before the CDC endpoint is ready to be written, so the
+    # first write can die with "Device not configured" on a board that is
+    # perfectly fine. Settle, then retry while the bootloader is still there --
+    # re-resolving the port each time, because macOS can rename it.
+    programmed = False
+    for attempt in range(3):
+        if attempt:
+            time.sleep(2.0)
+            again = bootloader_port([])
+            if not again:
+                log(f"{side}: bootloader went away before the retry")
+                break
+            port = again
+            log(f"{side}: retry {attempt} on /dev/{port}")
+        if flash(side, port):
+            programmed = True
+            break
+    if not programmed:
         setk(**{side: "orange"})
         return False
     setk(**{side: "green"})
