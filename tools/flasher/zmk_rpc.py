@@ -18,7 +18,7 @@ import time
 import serial
 from serial.serialutil import SerialException
 
-from zmk_proto import core_pb2, keymap_pb2, studio_pb2  # noqa: F401  (registers types)
+from zmk_proto import behaviors_pb2, core_pb2, keymap_pb2, studio_pb2  # noqa: F401  (registers types)
 
 SOF, ESC, EOF = 0xAB, 0xAC, 0xAD
 UNLOCKED = "ZMK_STUDIO_CORE_LOCK_STATE_UNLOCKED"
@@ -121,3 +121,60 @@ def read_keymap(port, unlock_wait=0.0):
         q.keymap.get_keymap = True
         resp = _call(ser, q, timeout=10.0)
         return resp.request_response.keymap.get_keymap
+
+
+def _param_descs(details, which):
+    """Full descriptors for a parameter slot: [{kind, name, constant}].
+
+    The name matters: &mkp takes a constant whose display text ("LCLK") exists
+    only here. Keeping just the kind would leave the renderer holding a bare
+    integer with no way to spell it, and every mouse key would read as an edit.
+    """
+    out, seen = [], set()
+    for pset in details.metadata:
+        for desc in getattr(pset, which):
+            kind = desc.WhichOneof("value_type")
+            if not kind:
+                continue
+            item = {"kind": kind, "name": desc.name,
+                    "constant": desc.constant if kind == "constant" else None}
+            sig = (item["kind"], item["name"], item["constant"])
+            if sig not in seen:
+                seen.add(sig)
+                out.append(item)
+    return out
+
+
+def read_behaviors(ser):
+    """behavior_id -> {name, param1, param2}.
+
+    The keymap gives only numeric behaviour ids. list_all_behaviors enumerates
+    them and get_behavior_details names each and describes its parameters, so
+    how to render a param is read off the device rather than assumed.
+    """
+    q = studio_pb2.Request(request_id=10)
+    q.behaviors.list_all_behaviors = True
+    ids = list(_call(ser, q).request_response.behaviors.list_all_behaviors.behaviors)
+
+    out = {}
+    for n, bid in enumerate(ids):
+        q = studio_pb2.Request(request_id=100 + n)
+        q.behaviors.get_behavior_details.behavior_id = bid
+        d = _call(ser, q).request_response.behaviors.get_behavior_details
+        out[bid] = {"name": d.display_name,
+                    "param1": _param_descs(d, "param1"),
+                    "param2": _param_descs(d, "param2")}
+    return out
+
+
+def read_board(port):
+    """One pass over the wire: lock check, keymap, and the behaviour table."""
+    with _open(port) as ser:
+        time.sleep(0.3)
+        if lock_state(ser) != UNLOCKED:
+            raise RpcError("locked",
+                           "The keyboard is locked. Press the unlock chord to continue.")
+        q = studio_pb2.Request(request_id=2)
+        q.keymap.get_keymap = True
+        km = _call(ser, q, timeout=10.0).request_response.keymap.get_keymap
+        return km, read_behaviors(ser)

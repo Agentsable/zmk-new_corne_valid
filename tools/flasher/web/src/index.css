@@ -167,3 +167,22 @@ h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(-
   color:var(--muted); border-radius:7px; padding:8px 10px; font:inherit; font-size:12px;
   cursor:pointer; }
 .notifybtn:hover { border-color:var(--fg); color:var(--fg); }
+
+/* --- ZMK update: source vs board, per layer --- */
+.zbar { display:flex; align-items:center; gap:14px; }
+.zlayer { display:flex; flex-direction:column; gap:8px; }
+.zlayer-head { display:flex; align-items:center; gap:10px; }
+.zpair { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.zgrid { display:flex; flex-wrap:wrap; gap:3px; }
+.zkey { font:11px/1 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--fg);
+  background:var(--key); border:1px solid var(--keyline); border-radius:4px;
+  padding:5px 4px; min-width:38px; text-align:center; cursor:default; }
+.zkey.was { background:rgba(255,93,93,.18); border-color:var(--red); color:var(--red);
+  cursor:pointer; }
+.zkey.now { background:rgba(255,166,43,.18); border-color:var(--orange); color:var(--orange);
+  cursor:pointer; }
+.zkey.rejected { opacity:.5; text-decoration:line-through; }
+.zkey.unknown { border-style:dashed; color:var(--muted); }
+.zkey.picked { outline:2px solid var(--blue); outline-offset:1px; }
+.zdecide { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.sdetail.ok { color:var(--green); }

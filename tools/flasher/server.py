@@ -502,28 +502,78 @@ class H(BaseHTTPRequestHandler):
                 ", ".join(f"{e.get('layer')}[{e.get('index')}]={e.get('binding')}"
                           for e in edits[:6]))
             return self._send(200, {"ok": True, "sha": st["pending"]["sha"]})
-        if self.path.startswith("/api/zmk/read"):
+        if self.path.startswith("/api/zmk/"):
             # Imported here, not at module scope: deploy.py runs on the system
             # interpreter, which has no protobuf. Flashing must not depend on
             # this page being usable.
             try:
-                import zmk_rpc
+                import zmk_diff, zmk_rpc
             except ImportError as e:
                 return self._send(503, {"kind": "no_deps", "error":
                     f"ZMK RPC deps missing ({e}). Recreate .venv via run.sh."})
+
+            if self.path.startswith("/api/zmk/decide"):
+                try:
+                    body = json.loads(raw or b"{}")
+                    key, adopt = body["key"], bool(body["adopt"])
+                    layer, idx = int(key.split("/")[0]), int(key.split("/")[1])
+                except Exception as e:
+                    return self._send(400, {"error": f"bad request: {e}"})
+                st = load_state()
+                rejected = set(st.get("zmk_rejected", []))
+                if adopt:
+                    binding = body.get("binding")
+                    if not binding:
+                        return self._send(400, {"error": "adopt needs the binding text"})
+                    src = keymap_mod.parse(open(KEYMAP).read(), REPO)
+                    if layer >= len(src["layers"]):
+                        return self._send(400, {"error": f"no layer {layer} in source"})
+                    name = src["layers"][layer]["name"]
+                    try:
+                        text = keymap_mod.set_bindings(
+                            open(KEYMAP).read(),
+                            [{"layer": name, "index": idx, "binding": binding}])
+                    except ValueError as e:
+                        return self._send(400, {"error": str(e)})
+                    open(KEYMAP, "w").write(text)
+                    rejected.discard(key)
+                    log(f"zmk: adopted {name}[{idx}] = {binding}")
+                else:
+                    rejected.add(key)
+                st["zmk_rejected"] = sorted(rejected)
+                save_state(st)
+                return self._send(200, {"ok": True, "adopted": adopt})
+
+            if self.path.startswith("/api/zmk/clear"):
+                st = load_state()
+                st["zmk_rejected"] = []
+                save_state(st)
+                return self._send(200, {"ok": True})
+
+            # read + diff
             port = (ports() or [None])[0]   # ports() is live; STATE has no "ports" key
             if not port:
                 return self._send(409, {"kind": "no_port",
                                         "error": "No keyboard serial port detected."})
             try:
-                km = zmk_rpc.read_keymap("/dev/" + port)
+                km, behaviors = zmk_rpc.read_board("/dev/" + port)
             except zmk_rpc.RpcError as e:
                 return self._send(409, {"kind": e.kind, "error": str(e)})
             except Exception as e:
                 return self._send(500, {"kind": "failed", "error": str(e)})
-            from google.protobuf.json_format import MessageToDict
-            return self._send(200, {"ok": True,
-                                    "keymap": MessageToDict(km, preserving_proto_field_name=True)})
+
+            board = [{"name": L.name,
+                      "bindings": [{"behavior_id": b.behavior_id,
+                                    "param1": b.param1, "param2": b.param2}
+                                   for b in L.bindings]}
+                     for L in km.layers]
+            src = keymap_mod.parse(open(KEYMAP).read(), REPO)
+            rejected = load_state().get("zmk_rejected", [])
+            return self._send(200, {
+                "ok": True,
+                "layers": zmk_diff.diff(src["layers"], board, behaviors, rejected),
+                "layout": src["layout"],
+            })
         self._send(404, {"error": "no route"})
 
 
