@@ -8,7 +8,7 @@ when both are green the commit can be pushed.
 Flashing shells out to adafruit-nrfutil: the Nordic legacy DFU protocol is not
 worth reimplementing just to reach it from a browser.
 """
-import base64, hashlib, hmac, json, os, re, subprocess, threading, time
+import base64, fcntl, hashlib, hmac, json, os, re, subprocess, threading, time
 
 import keymap as keymap_mod
 import verify as verify_mod
@@ -117,6 +117,40 @@ def git(*args, timeout=180):
                        text=True, timeout=timeout)
     out = (r.stdout + r.stderr).strip()
     return r.returncode == 0, out
+
+
+def dirty_outside_keymap():
+    """Paths that would be built but not described by the predeploy tag.
+
+    Docker builds the working tree, not the commit. The workflow commits the
+    keymap itself, so anything else still dirty ships in the firmware while the
+    tag points at a tree that never contained it."""
+    # -z, and read stdout directly: git() strips the combined output, which eats
+    # the leading space of the FIRST porcelain line only. Fixed-width slicing
+    # then shifts that one path by a character -- and if the keymap were first,
+    # it would no longer match and the gate would block the one change the
+    # workflow is meant to commit itself.
+    try:
+        r = subprocess.run(["git", "status", "--porcelain", "-z"], cwd=REPO,
+                           capture_output=True, text=True, timeout=60)
+    except Exception:
+        return []
+    if r.returncode != 0:
+        return []
+    paths, fields = [], [f for f in r.stdout.split("\0") if f]
+    i = 0
+    while i < len(fields):
+        entry = fields[i]
+        status, path = entry[:2], entry[3:]
+        if status[0] in "RC":        # rename/copy: the next field is the origin
+            i += 1
+        i += 1
+        if path and path != "config/eyelash_corne.keymap":
+            paths.append(path)
+    return paths
+
+
+
 
 
 def remote_has_tag(tag):
@@ -253,6 +287,10 @@ def basic_credentials():
         return "", ""
 STATE_FILE = os.path.join(ROOT, "state.json")
 AUDIT_LOG = os.path.join(ROOT, "audit.log")
+DEPLOY_LOCK_FILE = os.path.join(ROOT, ".deploy.lock")
+# Firmware inputs that live in this repo. Docker mounts the whole working tree,
+# so anything dirty under these is in the build whether or not it is committed.
+FIRMWARE_PATHS = ("config/", "boards/", "build.yaml", "west.yml")
 
 
 def keymap_sha():
@@ -389,6 +427,56 @@ def wait_for(pred, timeout):
     return None
 
 
+def port_serial(port):
+    """USB serial number of a port, or "" if it cannot be read.
+
+    Derived from the nRF chip id, so it is unique per half and stable across
+    reboots. It is the only thing that tells the two halves apart: both are
+    nice_nano_v2 running the same Adafruit bootloader, mounting the same
+    NICENANO volume.
+    """
+    try:
+        from serial.tools import list_ports
+        for p in list_ports.comports():
+            if p.device.endswith(port):
+                return p.serial_number or ""
+    except Exception:
+        pass
+    return ""
+
+
+def check_half(side, port):
+    """None when this port may be flashed as `side`, else why it may not.
+
+    Learns each half's serial the first time it is flashed, then refuses when
+    the serial in the bootloader is the one recorded for the OTHER half. Until
+    both have been seen once there is nothing to compare against -- nothing in
+    the hardware says "I am the left half", so the first sighting has to be
+    taken on trust.
+    """
+    serial_id = port_serial(port)
+    if not serial_id:
+        return None
+    known = load_state().get("half_serials", {})
+    other = "left" if side == "right" else "right"
+    if known.get(other) == serial_id:
+        return (f"that is the {other} half (serial {serial_id}); "
+                f"double-tap reset on the {side.upper()} half instead")
+    return None
+
+
+def remember_half(side, port):
+    serial_id = port_serial(port)
+    if not serial_id:
+        return
+    st = load_state()
+    halves = st.setdefault("half_serials", {})
+    if halves.get(side) != serial_id:
+        halves[side] = serial_id
+        save_state(st)
+        log(f"{side}: learned serial {serial_id}")
+
+
 def flash_half(side):
     """Wait for DFU on one half and flash it. True when programmed."""
     if wait_for(lambda: volume() is None, 60) is None:
@@ -400,6 +488,15 @@ def flash_half(side):
     if not port:
         log(f"{side}: timed out waiting for the bootloader")
         setk(**{side: "red"})
+        return False
+    # Both halves are nice_nano_v2 with identical bootloaders, so the wrong
+    # one double-tapped gets the wrong firmware, prints "Device programmed."
+    # and marks the step green. The serial is the only thing that differs.
+    wrong = check_half(side, port)
+    if wrong:
+        log(f"{side}: refusing -- {wrong}")
+        setk(**{side: "red"}, phase="error",
+             error=f"Wrong half in the bootloader: {wrong}.")
         return False
     setk(**{side: "orange"}, phase=f"{side}_flash")
     log(f"{side}: bootloader on /dev/{port}")
@@ -426,17 +523,32 @@ def flash_half(side):
     if not programmed:
         setk(**{side: "orange"})
         return False
+    remember_half(side, port)
     setk(**{side: "green"})
     log(f"{side}: programmed")
     return True
 
 
-def workflow(name):
-    """Named release: predeploy commit+push -> build -> flash right, left -> deployed.
+def workflow(name, allow_dirty=False):
+    """Named release: build -> predeploy commit+push -> flash right, left -> deployed.
 
     The predeploy tag lands before anything is flashed, so a half-finished
-    deployment is still traceable to the exact source that produced it.
+    deployment is still traceable to the exact source that produced it -- and
+    the build runs first, so nothing unbuildable ever reaches the remote.
     """
+    try:
+        lock = acquire_deploy_lock()
+    except DeployBusy as e:
+        setk(phase="error", error=str(e))
+        log(str(e))
+        return
+    try:
+        _workflow(name, allow_dirty)
+    finally:
+        release_deploy_lock(lock)
+
+
+def _workflow(name, allow_dirty=False):
     ts = time.strftime(VERSION_FMT)
     safe = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-") or "update"
     pre, done_tag = f"predeploy_{ts}_{safe}", f"deployed_{ts}_{safe}"
@@ -447,6 +559,14 @@ def workflow(name):
         step(key, "fail", msg)
         setk(phase="error", error=msg)
         log(f"workflow aborted: {msg}")
+
+    # 0. The tag must describe what gets built. Checked before the build, not
+    # after: Docker has already consumed the working tree by then.
+    extra = dirty_outside_keymap()
+    if extra and not allow_dirty:
+        return fail("build", "uncommitted changes would ship untagged: "
+                             + ", ".join(extra[:6])
+                             + (f" (+{len(extra)-6} more)" if len(extra) > 6 else ""))
 
     # 1. build FIRST. This used to run after the predeploy push, so a build
     # failure left origin/main advertising a keymap no board runs -- and
@@ -465,12 +585,37 @@ def workflow(name):
     # the keymap is in the firmware but not in the tag. Say so rather than let
     # the tag quietly misdescribe what shipped.
     ok_st, dirty = git("status", "--porcelain")
-    extra = [l for l in dirty.splitlines()
-             if l[3:].strip() and not l[3:].strip().endswith("eyelash_corne.keymap")]
-    if ok_st and extra:
-        log(f"warning: {len(extra)} uncommitted file(s) are in this build but not "
-            f"in the tag: {', '.join(l[3:].strip() for l in extra[:5])}")
-    git("add", "config/eyelash_corne.keymap")
+    if not ok_st:
+        return fail("predeploy", "could not read the working tree state")
+    untracked_fw, tracked_fw = [], []
+    for line in dirty.splitlines():
+        path = line[3:].strip().strip('"')
+        if not path or not path.startswith(FIRMWARE_PATHS):
+            continue
+        (untracked_fw if line.startswith("??") else tracked_fw).append(path)
+    # Untracked firmware sources are IN the build and cannot be committed on
+    # the author's behalf -- guessing at intent here is how a tag ends up
+    # describing something other than what shipped. Refuse instead.
+    if untracked_fw:
+        return fail("predeploy",
+                    "untracked firmware sources would be built but not tagged: "
+                    + ", ".join(untracked_fw[:5])
+                    + ". Commit or remove them, then start again.")
+    # Everything else dirty under config/ or boards/ is a real firmware input,
+    # so stage it: the tag has to name what Docker actually compiled, not just
+    # the keymap.
+    for path in tracked_fw:
+        git("add", path)
+    if not tracked_fw:
+        git("add", "config/eyelash_corne.keymap")
+    elif len(tracked_fw) > 1:
+        log(f"predeploy: staging {len(tracked_fw)} firmware file(s): "
+            + ", ".join(tracked_fw[:5]))
+    orphans = orphan_predeploy_tags()
+    if orphans:
+        log(f"note: {len(orphans)} predeploy tag(s) never finished, oldest "
+            f"{orphans[0]}. Prune with: git tag -d <tag> && "
+            f"git push origin :refs/tags/<tag>")
     okc, out = git("commit", "-m", pre)
     # A clean tree is normal: a version may tag an unchanged keymap. git words
     # this two different ways depending on whether anything was staged.
@@ -532,6 +677,53 @@ def workflow(name):
     # UI saying complete while the request stayed open and notify.js re-fired.
     setk(phase="done")
     log(f"deployed: {done_tag}")
+
+
+class DeployBusy(Exception):
+    pass
+
+
+def acquire_deploy_lock():
+    """Exclusive across PROCESSES, not just threads.
+
+    STATE lives in one process, so /api/start's gate cannot see ./deploy.py and
+    vice versa. Two runs at once share build/{left,right}_nice under
+    --pristine=never, put two nrfutil sessions on one serial port, and both
+    tag and push. Returns the handle to hold for the length of the run.
+    """
+    fh = open(DEPLOY_LOCK_FILE, "w")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        raise DeployBusy("Another update is already running "
+                         "(the web app or ./deploy.py). Wait for it to finish.")
+    fh.write(f"{os.getpid()}\n")
+    fh.flush()
+    return fh
+
+
+def release_deploy_lock(fh):
+    try:
+        fcntl.flock(fh, fcntl.LOCK_UN)
+    finally:
+        fh.close()
+
+
+def orphan_predeploy_tags():
+    """predeploy_* tags with no matching deployed_* -- runs that never finished.
+
+    Nothing deletes a tag, so each failed or retried run leaves one behind and
+    they accumulate on origin unnoticed. Surfacing the count is what makes them
+    prunable instead of invisible.
+    """
+    ok, out = git("tag", "--list", "predeploy_*", "deployed_*")
+    if not ok:
+        return []
+    tags = set(out.split())
+    return sorted(t for t in tags
+                  if t.startswith("predeploy_")
+                  and "deployed_" + t[len("predeploy_"):] not in tags)
 
 
 def guarded(fn):
@@ -664,6 +856,7 @@ class H(BaseHTTPRequestHandler):
             s["request"] = request_info()
             s["ports"] = ports()
             s["volume"] = volume()
+            s["orphan_tags"] = orphan_predeploy_tags()
             return self._send(200, s)
         rel = self.path.split("?")[0].lstrip("/") or "index.html"
         path = os.path.join(DIST, rel)
@@ -831,7 +1024,9 @@ class H(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._send(500, {"kind": "failed", "error": str(e)})
 
-            board = [{"name": L.name,
+            # id travels with the layer across a reorder; name is what the
+            # diff pairs on, and both beat array position.
+            board = [{"name": L.name, "id": L.id,
                       "bindings": [{"behavior_id": b.behavior_id,
                                     "param1": b.param1, "param2": b.param2}
                                    for b in L.bindings]}

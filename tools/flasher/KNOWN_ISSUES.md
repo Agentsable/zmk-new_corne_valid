@@ -105,11 +105,16 @@ Grouped by the shape of the failure rather than by file.
 
 ## Open
 
-### 1. The predeploy tag still does not fully identify the firmware
-Docker builds the working tree, so anything dirty outside the keymap is in the
-firmware but not in the tag. The run now logs a warning naming the files, which
-is honest but not a guarantee. A real fix commits everything or refuses to build
-a dirty tree.
+### ~~1. The predeploy tag still does not fully identify the firmware~~ FIXED
+The run now **refuses** rather than warning. `dirty_outside_keymap()` is checked
+before the build, not after -- Docker has already consumed the working tree by
+then -- and `workflow(name, allow_dirty=True)` is the deliberate override.
+
+Parsing this needed `--porcelain -z` read straight from stdout: `git()` strips
+its combined output, which eats the leading space of the *first* porcelain line
+only. Fixed-width slicing then shifts that one path by a character, and had the
+keymap been first it would have stopped matching and the gate would have blocked
+the one change the workflow commits itself.
 
 ### 2. Nothing checks *which* half is in DFU
 `flash_half` waits for any NICENANO mount and writes that side's package. Both
@@ -117,10 +122,10 @@ halves are `nice_nano_v2` with identical bootloaders, so double-tapping the
 wrong one programmes the wrong firmware, prints `Device programmed.` and marks
 the step green. Not detectable from this side.
 
-### 3. `deploy.py` has no cross-process guard
-`STATE` is in-process and there is no lockfile, so `./deploy.py` while the
-server is mid-deploy gives two Docker builds sharing one build directory and two
-nrfutil sessions on one port. The `/api/start` gate itself is correct.
+### ~~3. `deploy.py` has no cross-process guard~~ ALREADY FIXED
+`acquire_deploy_lock()` takes `fcntl.flock(LOCK_EX|LOCK_NB)` on
+`.deploy.lock` and `workflow()` holds it for the whole run. Exclusive across
+processes and released if the holder dies. This entry was stale.
 
 ### 4. Layer identity is positional
 `keymap_pb2.Layer` carries an `id` that `server.py` drops, so source and board
