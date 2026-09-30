@@ -288,9 +288,6 @@ def basic_credentials():
 STATE_FILE = os.path.join(ROOT, "state.json")
 AUDIT_LOG = os.path.join(ROOT, "audit.log")
 DEPLOY_LOCK_FILE = os.path.join(ROOT, ".deploy.lock")
-# Firmware inputs that live in this repo. Docker mounts the whole working tree,
-# so anything dirty under these is in the build whether or not it is committed.
-FIRMWARE_PATHS = ("config/", "boards/", "build.yaml", "west.yml")
 
 
 def keymap_sha():
@@ -581,36 +578,10 @@ def _workflow(name, allow_dirty=False):
     # 2. predeploy commit + push
     step("predeploy", "run")
     setk(phase="predeploy")
-    # Docker builds the working tree, not the commit, so anything dirty outside
-    # the keymap is in the firmware but not in the tag. Say so rather than let
-    # the tag quietly misdescribe what shipped.
-    ok_st, dirty = git("status", "--porcelain")
-    if not ok_st:
-        return fail("predeploy", "could not read the working tree state")
-    untracked_fw, tracked_fw = [], []
-    for line in dirty.splitlines():
-        path = line[3:].strip().strip('"')
-        if not path or not path.startswith(FIRMWARE_PATHS):
-            continue
-        (untracked_fw if line.startswith("??") else tracked_fw).append(path)
-    # Untracked firmware sources are IN the build and cannot be committed on
-    # the author's behalf -- guessing at intent here is how a tag ends up
-    # describing something other than what shipped. Refuse instead.
-    if untracked_fw:
-        return fail("predeploy",
-                    "untracked firmware sources would be built but not tagged: "
-                    + ", ".join(untracked_fw[:5])
-                    + ". Commit or remove them, then start again.")
-    # Everything else dirty under config/ or boards/ is a real firmware input,
-    # so stage it: the tag has to name what Docker actually compiled, not just
-    # the keymap.
-    for path in tracked_fw:
-        git("add", path)
-    if not tracked_fw:
-        git("add", "config/eyelash_corne.keymap")
-    elif len(tracked_fw) > 1:
-        log(f"predeploy: staging {len(tracked_fw)} firmware file(s): "
-            + ", ".join(tracked_fw[:5]))
+    # Only the keymap is staged here. Step 0 has already refused anything else
+    # dirty, so there is nothing left to sweep up -- and committing other files
+    # on the author's behalf is the guessing step 0 exists to avoid.
+    git("add", "config/eyelash_corne.keymap")
     orphans = orphan_predeploy_tags()
     if orphans:
         log(f"note: {len(orphans)} predeploy tag(s) never finished, oldest "
