@@ -15,7 +15,8 @@ export default function Coords() {
   const [g, setG] = useState(null);
   useEffect(() => {
     fetch("/api/keymap").then((r) => r.json())
-      .then((j) => setG({ layout: j.layout, rc: j.rc, keys: j.layers?.[0]?.keys ?? [] }))
+      .then((j) => setG({ layout: j.layout, rc: j.rc, keys: j.layers?.[0]?.keys ?? [],
+                          stale: j.stale, staleAt: j.stale_at }))
       .catch(() => {});
   }, []);
   if (!g?.layout?.length) return <div className="page"><h1>Key coordinates</h1></div>;
@@ -26,6 +27,10 @@ export default function Coords() {
   const half = (i) => (layout[i][0] < split ? "L" : "R");
 
   const labels = coordLabels(layout, rc, keys);
+  // These names are what the owner reads out when asking for a change, so a
+  // cached copy has to say so -- a name that has moved is worse here than
+  // anywhere else on the site.
+  const staleAt = g.stale ? new Date(g.staleAt).toLocaleString() : null;
   // coordLabels refuses to guess when the key flags are missing; say so rather
   // than render a board whose every label is off by a column.
   if (!labels.length) {
@@ -56,6 +61,10 @@ export default function Coords() {
   return (
     <div className="page">
       <h1>Key coordinates</h1>
+      {staleAt && (
+        <p className="err stale">Cached copy from {staleAt}. The local flasher is
+          unreachable, so these names are not known to match the board.</p>
+      )}
       <p className="blurb">
         How to name a key when asking for a change: half, matrix row, then column
         within that half counted left to right. The small number is the key's
