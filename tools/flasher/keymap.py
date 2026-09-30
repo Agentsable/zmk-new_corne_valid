@@ -43,7 +43,29 @@ def kc(tok):
         return tok
     if len(tok) == 1:
         return tok
+    alias = _expand_alias(tok)
+    if alias:
+        return kc(alias)
     return tok
+
+
+def _expand_alias(tok):
+    """EXCL -> "LS(N1)", so the shifted-symbol path above can spell it as "!".
+
+    keys.h defines a whole family of these (EXCL, AT, DQT, PIPE, ...). They were
+    falling through to the raw name, so a key bound to &kp EXCL rendered as
+    "EXCL" on the board diagram. Expanded from the header rather than a second
+    hand-written table, which would drift.
+    """
+    try:
+        import zmk_decode
+    except Exception:
+        return None
+    v = zmk_decode.encode_alias(tok)
+    if v is None:
+        return None
+    back = zmk_decode.decode_keycode(v)
+    return back if back and back != tok else None
 
 
 def label(binding, speeds):
@@ -188,15 +210,29 @@ def _inverse_display():
 _INVERSE = None
 
 
+# What each behaviour's parameters have to be, for the behaviours whose
+# signature is knowable. Anything not listed is left alone on purpose.
+#   key    a keycode keys.h defines          (&kp A, &mt LSHFT B)
+#   layer  a layer index                     (&mo 1, &lt 2 SPACE)
+#   name   a constant from the non-keycode headers (&mkp LCLK, &mmv MOVE_UP)
+PARAMS = {
+    "kp": ("key",), "sk": ("key",),
+    "mo": ("layer",), "to": ("layer",), "tog": ("layer",), "sl": ("layer",),
+    "lt": ("layer", "key"), "mt": ("key", "key"),
+    "mkp": ("name",), "mmv": ("name",), "msc": ("name",),
+    "trans": (), "none": (), "studio_unlock": (), "soft_off": (), "bootloader": (),
+}
+
+
 def why_invalid(binding):
     """None when ZMK will compile this binding, else a sentence saying why not.
 
     Both the live preview and the write path ask this, so what the editor
     refuses and what can reach the keymap cannot drift apart.
 
-    ponytail: only &kp's parameter is checked. It is what clicking a key writes
-    and the only keycode parameter this keymap uses; widen to the trailing
-    parameter of &lt/&mt/&sk if those ever get typed by hand.
+    Behaviours absent from PARAMS -- locally defined tap dances and sensor
+    rotates, anything ZMK adds later -- pass on arity and parameters. Claiming
+    to know a signature we do not would reject bindings that build fine.
     """
     parts = (binding or "").split()
     if not parts:
@@ -209,13 +245,25 @@ def why_invalid(binding):
     name = parts[0].lstrip("&")
     if known and name not in known:
         return f"no behaviour called &{name}"
-    if name == "kp":
-        if len(parts) != 2:
-            return "&kp takes exactly one keycode"
-        if not zmk_decode.known_keycode(parts[1]):
-            # Left unchecked this reaches the keymap, and workflow() pushes the
-            # predeploy tag before it builds -- so the break lands on main first.
-            return f"{parts[1]} is not a keycode ZMK defines"
+    spec = PARAMS.get(name)
+    if spec is None:
+        return None
+    args = parts[1:]
+    if len(args) != len(spec):
+        return (f"&{name} takes {len(spec)} parameter"
+                f"{'' if len(spec) == 1 else 's'}, got {len(args)}")
+    for arg, kind in zip(args, spec):
+        # Left unchecked any of these reaches the keymap, and workflow() pushes
+        # the predeploy tag before it builds -- so the break lands on main first.
+        if kind == "layer":
+            if not re.fullmatch(r"\d+", arg):
+                return f"&{name} needs a layer number, not {arg}"
+        elif kind == "key":
+            if not zmk_decode.known_keycode(arg):
+                return f"{arg} is not a keycode ZMK defines"
+        elif kind == "name":
+            if not zmk_decode.known_param(arg):
+                return f"{arg} is not a name ZMK defines"
     return None
 
 

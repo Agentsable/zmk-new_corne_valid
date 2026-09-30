@@ -1,108 +1,184 @@
 # Known issues and where to look next
 
-State as of 2026-09-30. Everything here was observed, not guessed; each entry
-says how it was seen so it can be re-checked rather than re-argued.
+State as of 2026-09-30, after a three-way bug hunt over the ZMK serial path,
+the layout/coordinate derivation and the flash/deploy machinery.
 
 The pattern worth carrying: every failure this tool has had looked like success.
 A push that deployed nothing printed nothing. An indicator froze on its last
 value instead of reporting the truth. A release was named after seven changes it
-did not contain. Prefer checks that fail loudly over states that merely look
-fine.
+did not contain. Two deploy buttons could never start a deploy and said nothing
+when they failed. A read that obtained zero bytes from the keyboard rendered as
+"source and board agree". Prefer checks that fail loudly over states that merely
+look fine.
+
+## Fixed in this pass
+
+Grouped by the shape of the failure rather than by file.
+
+### Failures that looked like success
+- **Both deploy buttons were dead.** `Deploy.jsx` and `Workflow.jsx` never sent
+  the `build` hash, so `/api/start` answered 409 for every click, local and
+  hosted. `Deploy.jsx` dropped the promise entirely and `Workflow.jsx` never
+  read the response, so nothing was shown either way. `BUILD` and the POST now
+  live in `start.js`, which every caller shares and which always returns a
+  reason. Verified by intercepting the request in-page: both send the current
+  bundle hash and render the refusal.
+- **A failed ZMK read rendered as "source and board agree".** `_call` trusted
+  proto3 defaults, so a device error, a `lock_state_changed` notification
+  landing in the read window, or an empty frame all arrived as a keymap with
+  zero layers. It now matches `request_id`, rejects the wrong subsystem, raises
+  on `meta.simple_error`, skips notifications, and refuses an empty behaviour
+  table or a keymap with no layers.
+- **A failed `git show` rendered as a valid keymap.** `/api/keymap?current`
+  ignored the exit code; 128 with empty stdout parsed into `layers: []` with a
+  full layout, which the coordinate card rendered with 27 of 48 labels
+  renumbered. Checked, and `coordLabels()` now refuses to guess without the key
+  flags rather than returning shifted names.
+- **Three verify checks passed vacuously.** Zero layers compared an empty list
+  to an empty list and reported "0 bindings identical on re-parse"; "Layout and
+  matrix agree" could only ever be seen passing because `analyse()` raises
+  first. They now count what they actually examined and fail on nothing to
+  compare.
+- **The deployed step discarded two return values.** A failed `git push origin
+  main` was invisible: the tag push still shipped the objects, so the page
+  printed "Deployment complete." while origin/main pointed at the old keymap.
+
+### State that was wrong but indistinguishable from right
+- **Offline data is marked.** The worker's `stale`/`stale_at` had no reader;
+  cached keys rendered identically to live ones. `Keymap.jsx` now says so.
+- **`Deploy.jsx` and `Workflow.jsx` honour `local_down`.** A tunnel drop
+  mid-deploy showed both halves as "not started" and "No pending version."
+- **`notify.js` covers the offline transition** and no longer re-fires the
+  double-tap prompt when the tunnel recovers.
+
+### Unvalidated input
+- **Every checkable behaviour parameter is validated**, not just `&kp`'s.
+  `&lt 2 SPACEE`, `&mt LSHFT XX` and `&sk XX` all passed and would have failed
+  the build after the predeploy tag was pushed. `PARAMS` in `keymap.py` carries
+  the signatures; unknown behaviours still pass on purpose.
+- **`known_param` covers the non-keycode headers** (pointing, bt, rgb, outputs)
+  plus the keymap's own `#define`s, so `&mmv SLOW_UP` validates and
+  `&mmv MOVE_UPP` does not.
+
+### Robustness
+- **One deploy path.** `sequence()` never built: it flashed whatever `.zip` was
+  left in `PKG_DIR`, then recorded the current keymap as deployed. Deleted;
+  unnamed updates run `workflow()` like everything else.
+- **Build before push.** A build failure used to leave origin advertising a
+  keymap no board runs.
+- **`guarded()` wraps the workflow thread.** One escaping exception left the
+  phase mid-flight forever and `/api/start` refused everything until restart.
+- **Subprocess watchdogs.** `p.wait(timeout=)` was unreachable because
+  `for line in p.stdout` blocks first; a stalled build or an nrfutil blocked on
+  an unplugged board hung the thread with a live-looking log. `run_streaming()`
+  kills the child.
+- **`write_timeout` on the serial port**, which defaulted to blocking forever.
+- **The flash retry keeps its baseline.** `bootloader_port([])` discarded it and
+  could point nrfutil at a board running its firmware.
+- **`/api/save` is serialised.** Two concurrent saves lost one set of edits.
+- **`log()` reaches disk** (`audit.log`), so the audit trail and the refusal
+  lines survive a restart.
+
+### Correctness of the diff
+- **`range` parameters are rendered.** `&mmv`/`&msc` are `input_two_axis`, whose
+  param1 the firmware declares as RANGE; it was unhandled, so all ten pointer
+  keys were permanently "unnameable" and a change to any of them was invisible.
+  `MOVE_X`/`MOVE_Y` packing is resolved, with the keymap's
+  `ZMK_POINTING_DEFAULT_MOVE_VAL` override winning as `#ifndef` requires.
+- **Keycode aliases compare equal.** `encode_alias` follows the `#define` chain,
+  so `&kp EXCL` and the board's `LS(N1)` are the same key instead of a permanent
+  phantom diff. The same expansion gives `&kp EXCL` the label `!`.
+- **Extra board layers and missing bindings are no longer "in sync".**
+- **Positional parameter shift fixed**: an empty param1 with a populated param2
+  promoted param2 into the first slot.
+
+### Other
+- Four independent `/api/state` pollers became one shared subscriber
+  (`flasherState.js`); a single tab went from ~2.6 req/s to ~1.05.
+- The offline edit queue has a UI. The worker's `/queue` had no caller at all.
+- `layout.py` regexes accept hex `col-offset`, parenthesised negative `rx`/`ry`
+  and `RC(0, 0)` with a space; a legal `col-offset` of `0` is no longer read as
+  "no right half".
+- `restart.sh` kills by listening port. `pkill -f "python server.py"` matched
+  nothing, because the macOS framework binary is `Python` with a capital P --
+  which is why a fix appeared not to work for two rounds of testing.
 
 ## Open
 
-### 1. The offline edit queue has no UI — feature unreachable
-The Worker implements `/queue` (add, list, flush, clear) with the `base_sha`
-conflict guard, and all of it works over curl. **Nothing in `web/src` calls it**
-(`grep -rn "/queue" web/src` is empty). Composing edits while the Mac is off —
-the behaviour chosen when this was designed — cannot be done from the browser.
+### 1. The predeploy tag still does not fully identify the firmware
+Docker builds the working tree, so anything dirty outside the keymap is in the
+firmware but not in the tag. The run now logs a warning naming the files, which
+is honest but not a guarantee. A real fix commits everything or refuses to build
+a dirty tree.
 
-### 2. Offline data is not marked stale — highest risk here
-The Worker returns `stale: true` and `stale_at` when serving the KV cache, and
-**no component reads either** (`grep -rn "stale" web/src` is empty). With the Mac
-off, "Current keymap" renders cached data that looks live. This is the same
-shape as the bugs that already cost two deploys: state that is wrong but
-indistinguishable from state that is right.
+### 2. Nothing checks *which* half is in DFU
+`flash_half` waits for any NICENANO mount and writes that side's package. Both
+halves are `nice_nano_v2` with identical bootloaders, so double-tapping the
+wrong one programmes the wrong firmware, prints `Device programmed.` and marks
+the step green. Not detectable from this side.
 
-### 3. `log()` never reaches disk — the audit trail does not survive
-`server.py::log` appends to `STATE["log"]`, capped at 200 entries, lost on
-restart. `server.log` only ever receives stdout/stderr. So `_audit` ("Record
-every mutating request ... unexplained writes should be attributable") and the
-`refused remote request` security line both vanish exactly when they would be
-needed. Seen by grepping `server.log` for a refusal that had definitely
-happened and finding nothing; it was only in `/api/state`.
+### 3. `deploy.py` has no cross-process guard
+`STATE` is in-process and there is no lockfile, so `./deploy.py` while the
+server is mid-deploy gives two Docker builds sharing one build directory and two
+nrfutil sessions on one port. The `/api/start` gate itself is correct.
 
-### 4. Only `&kp`'s parameter is validated
-`why_invalid` checks the behaviour for everything and the keycode for `&kp`
-only. `&lt 2 SPACEE`, `&mt LSHFT XX` and `&sk XX` still pass and would fail the
-build. Same class as the bug fixed in 69788d1, narrower surface. Marked with a
-`ponytail:` comment naming the ceiling.
+### 4. Layer identity is positional
+`keymap_pb2.Layer` carries an `id` that `server.py` drops, so source and board
+are paired by array position. `move_layer` in Studio would produce a phantom
+diff across every moved layer.
 
-### 5. `&kp EXCL` renders as "EXCL", not `!`
-Cosmetic. The display map has no entry for mod-expanded keycodes, so the label
-falls back to the raw name. The binding itself is correct.
+### 5. Orphan predeploy tags accumulate
+Nothing deletes a tag. A failed run leaves `predeploy_*` on origin with no
+`deployed_*`, and each retry mints a new timestamp.
 
 ## Operational gaps (not defects)
 
 - **Cloudflare Access was never configured.** Both API tokens return
-  `auth.forbidden` for `access/apps` and `access/service_tokens`; it needs the
-  Zero Trust dashboard. Basic auth stands in and nothing has to change when
-  Access lands.
-- **Auto-deploy only fires from this Mac.** `.githooks/pre-push` builds and
-  deploys when `tools/flasher/{web,worker}` changes. Hooks are not cloned: a
-  fresh clone needs `git config core.hooksPath .githooks`. Cloudflare Workers
-  Builds would make this server-side but needs their GitHub App installed.
-- **The Basic auth password has been printed into a session transcript**, and
-  `.claude-trace/` exists in this repo. Rotating is a minute: regenerate the
-  three values, `wrangler secret put BASIC_USER/BASIC_PASS/LOCAL_SECRET`,
-  rewrite `.remote-secret`, restart the server.
+  `auth.forbidden` for `access/apps`; it needs the Zero Trust dashboard. Basic
+  auth stands in.
+- **Auto-deploy only fires from this Mac.** `.githooks/pre-push` deploys when
+  `tools/flasher/{web,worker}` changes. Hooks are not cloned: a fresh clone
+  needs `git config core.hooksPath .githooks`.
+- **The Basic auth password has been printed into a session transcript.**
+  Rotating is a minute: regenerate, `wrangler secret put`, rewrite
+  `.remote-secret`, restart.
 
-## Not bugs, verified
+## Verified correct, do not re-investigate
 
-- `&td0` and `&rsr_scrl` validate fine. `zmk_decode.behaviors()` deliberately
-  scans the keymap as well as ZMK's dtsi files, so locally-defined behaviours
-  are known by design.
-- All 192 bindings currently in the keymap pass `why_invalid`. Worth re-running
-  after any change to the validator: clicking a key prefills its current
-  binding, so a false negative would block re-applying a key unchanged.
-
-## Where bugs are most likely next
-
-Ranked by how little they have been exercised.
-
-1. **ZMK update page** — the serial RPC read/diff/adopt path. It renders, and
-   that is all that has ever been checked. Adopting a binding from the board
-   writes through `set_bindings`, so it now inherits validation, but the decode
-   and diff have not been exercised since the hosted work began.
-2. **Flash workflow error paths** — the happy path ran once. Untested: tunnel
-   dropping mid-deploy, board unplugged mid-write, `git push` failing at
-   predeploy (which pushes *before* building), two clients hitting `/api/start`
-   at once.
-3. **Queue flush success path** — only the conflict rejection has ever run. A
-   flush that actually applies has not.
-4. **Build guard, `remote:` branch** — the local-hash and stale-tab branches are
-   verified; the hosted-UI branch has never been exercised by a real deploy
-   click from `keys.hyperdev.app`.
-5. **Source verification and Deployment workflow pages** — render only; output
-   never checked for correctness.
-6. **Key coordinates page** — labels never cross-checked against the physical
-   board, and the whole naming convention rests on them.
-7. **`notify.js`** — untouched all session.
+- **All 48 coordinate labels**, traced key-by-key from `.dtsi` geometry through
+  the matrix transform and cross-checked against the QWERTY bindings. Three
+  independent sources agree. `R20` is index 36 (`&kp N`), the rotary is 34, the
+  joystick is 6/19/20/21/35.
+- **`flash()`'s success test**: requires the literal `Device programmed.` line
+  as well as `rc == 0`.
+- **`remote_has_tag`**: correctly refuses to trust a zero exit from `git push`.
+- **`/api/start`'s concurrency gate**: phase is read and written under one lock.
+- **`save_state`**: tmp file plus `os.replace`, atomic.
+- **`_remote_ok`**: `hmac.compare_digest` for both the shared secret and Basic
+  auth.
+- **Port closing** in `read_board`, via `with _open(port)`.
+- All 192 bindings in the committed keymap validate, and the board reads back
+  with 0 changed and 0 unknown.
 
 ## How to hunt
 
     cd tools/flasher
-    python3 test_detect.py        # bootloader detection, 6 checks
+    python3 test_detect.py        # bootloader detection
     python3 test_bindings.py      # binding validation, both paths + all 192 keys
+    python3 zmk_diff.py           # diff, mutation, rejection
+    python3 -c "import verify,os;print(verify.run(os.path.abspath('../..')))"
 
 For the UI, drive Chrome over CDP and **capture console errors**, not just
-screenshots — the crashes found this session (`Cannot read properties of null`)
-were invisible in a screenshot but loud in `Runtime.exceptionThrown`. Chrome
-cannot be scripted here via AppleScript; launch a separate headless instance
-with `--remote-debugging-port` and connect with `suppress_origin=True`. Wait for
-the port properly: a busy-loop with no sleep returns before Chrome binds.
+screenshots -- this pass introduced a `ReferenceError` that was invisible in a
+screenshot and obvious in `Runtime.exceptionThrown`. Chrome cannot be scripted
+here via AppleScript; launch a headless instance with `--remote-debugging-port`
+and connect with `suppress_origin=True`.
 
-Test the failure states deliberately, not only the working one. Kill the tunnel
-and confirm the indicator turns red rather than freezing. Clear the session and
-confirm it says "sign in", not "local app off". Feed the editor a binding that
-cannot compile and confirm Apply goes grey.
+To exercise a deploy button without deploying, override `window.fetch` in the
+page and return a synthetic 409. `Network.setBlockedURLs` does **not** work for
+this: a blocked request emits no `requestWillBeSent`, so the body cannot be
+inspected.
+
+Test the failure states deliberately. Block `/api/state` and confirm the
+indicator turns red rather than freezing; drop the auth header and confirm it
+says "sign in", not "local app off". Both were checked this pass and both hold.

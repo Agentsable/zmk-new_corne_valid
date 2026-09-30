@@ -26,6 +26,18 @@ export default function Coords() {
   const half = (i) => (layout[i][0] < split ? "L" : "R");
 
   const labels = coordLabels(layout, rc, keys);
+  // coordLabels refuses to guess when the key flags are missing; say so rather
+  // than render a board whose every label is off by a column.
+  if (!labels.length) {
+    return (
+      <div className="page">
+        <h1>Key coordinates</h1>
+        <p className="err">The keymap could not be read, so these keys cannot be
+          named. Reload once the flasher is reachable — do not use names from a
+          previous view, they may refer to different keys.</p>
+      </div>
+    );
+  }
 
   const W = 100, H = 100, PAD = 20;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;

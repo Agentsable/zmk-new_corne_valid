@@ -18,7 +18,8 @@ import time
 import serial
 from serial.serialutil import SerialException
 
-from zmk_proto import behaviors_pb2, core_pb2, keymap_pb2, studio_pb2  # noqa: F401  (registers types)
+from zmk_proto import (behaviors_pb2, core_pb2, keymap_pb2,  # noqa: F401  (registers types)
+                       meta_pb2, studio_pb2)
 
 SOF, ESC, EOF = 0xAB, 0xAC, 0xAD
 UNLOCKED = "ZMK_STUDIO_CORE_LOCK_STATE_UNLOCKED"
@@ -65,29 +66,91 @@ def _read_frame(ser, timeout):
         elif b == ESC:
             escaped = True
         elif b == EOF:
-            return bytes(buf)
+            # A bare SOF/EOF pair yields b"", and ParseFromString(b"") SUCCEEDS,
+            # producing a default Response that reads as an empty keymap. Keep
+            # waiting instead of handing back a frame that says nothing.
+            if buf:
+                return bytes(buf)
         elif b == SOF:
+            # escaped must reset too: a frame truncated right after an ESC left
+            # this set, so the next SOF was swallowed as literal data and the
+            # following frame appended to a stale buffer.
             buf.clear()
+            escaped = False
         else:
             buf.append(b)
     return None
 
 
-def _call(ser, request, timeout=5.0):
+def _call(ser, request, timeout=5.0, expect=None):
+    """Send one request; return only a response that actually answers it.
+
+    Every field access on a proto3 message succeeds: an unset submessage yields
+    a default instance. So a device error, a notification landing in the read
+    window, or an empty frame all used to arrive as `Keymap` with zero layers,
+    and the page rendered that as "source and board agree". A read that obtained
+    nothing has to be distinguishable from a board that matches.
+
+    ZMK raises core.lock_state_changed on every lock transition -- i.e. exactly
+    when the user presses the unlock chord the UI asked for -- so notifications
+    are not an edge case; they are skipped and the read continues.
+
+    `expect` is "<subsystem>.<response_type>", e.g. "keymap.get_keymap".
+    """
     ser.reset_input_buffer()
     ser.write(_frame(request.SerializeToString()))
     ser.flush()
-    raw = _read_frame(ser, timeout)
-    if raw is None:
-        raise RpcError("no_response", "The keyboard did not answer. Is the left half connected?")
-    resp = studio_pb2.Response()
-    resp.ParseFromString(raw)
-    return resp
+    deadline = time.time() + timeout
+    while True:
+        left = deadline - time.time()
+        if left <= 0:
+            raise RpcError("no_response",
+                           "The keyboard did not answer. Is the left half connected?")
+        raw = _read_frame(ser, left)
+        if raw is None:
+            raise RpcError("no_response",
+                           "The keyboard did not answer. Is the left half connected?")
+        resp = studio_pb2.Response()
+        try:
+            resp.ParseFromString(raw)
+        except Exception as e:
+            raise RpcError("protocol", f"Unreadable reply from the keyboard: {e}")
+
+        kind = resp.WhichOneof("type")
+        if kind == "notification":
+            continue                      # volunteered by the board; not our answer
+        if kind != "request_response":
+            raise RpcError("protocol", "The keyboard sent a reply of an unknown kind.")
+
+        rr = resp.request_response
+        if rr.request_id != request.request_id:
+            continue                      # a late answer to an earlier request
+        sub_name = rr.WhichOneof("subsystem")
+        if sub_name == "meta":
+            code = rr.meta.simple_error
+            try:
+                code = meta_pb2.ErrorConditions.Name(code)
+            except Exception:
+                pass
+            raise RpcError("device_error", f"The keyboard refused the request: {code}")
+        if expect:
+            want_sub, want_call = expect.split(".")
+            if sub_name != want_sub:
+                raise RpcError("protocol",
+                               f"Expected a {want_sub} reply, got {sub_name or 'nothing'}.")
+            got = getattr(rr, sub_name).WhichOneof("response_type")
+            if got != want_call:
+                raise RpcError("protocol",
+                               f"Expected {want_call}, got {got or 'nothing'}.")
+        return resp
 
 
 def _open(port):
     try:
-        return serial.Serial(port, 115200, timeout=0.2)
+        # write_timeout defaults to None in pyserial, i.e. block forever. A half
+        # unplugged after the port opened hung the request thread holding the
+        # port, with the button stuck on "Reading..." until the server restarted.
+        return serial.Serial(port, 115200, timeout=0.2, write_timeout=10)
     except SerialException as e:
         if "Resource busy" in str(e) or "Errno 16" in str(e):
             raise RpcError("busy", "Another program holds the port -- disconnect zmk.studio.")
@@ -97,30 +160,8 @@ def _open(port):
 def lock_state(ser):
     q = studio_pb2.Request(request_id=1)
     q.core.get_lock_state = True
-    resp = _call(ser, q)
+    resp = _call(ser, q, expect="core.get_lock_state")
     return core_pb2.LockState.Name(resp.request_response.core.get_lock_state)
-
-
-def read_keymap(port, unlock_wait=0.0):
-    """Return the board's keymap as a protobuf message.
-
-    `unlock_wait` seconds are spent polling for the user to press the unlock
-    chord; 0 means fail immediately so a UI can ask rather than hang.
-    """
-    with _open(port) as ser:
-        time.sleep(0.3)
-        state = lock_state(ser)
-        if state != UNLOCKED:
-            deadline = time.time() + unlock_wait
-            while time.time() < deadline and state != UNLOCKED:
-                time.sleep(1.0)
-                state = lock_state(ser)
-        if state != UNLOCKED:
-            raise RpcError("locked", "The keyboard is locked. Press the unlock chord to continue.")
-        q = studio_pb2.Request(request_id=2)
-        q.keymap.get_keymap = True
-        resp = _call(ser, q, timeout=10.0)
-        return resp.request_response.keymap.get_keymap
 
 
 def _param_descs(details, which):
@@ -154,13 +195,20 @@ def read_behaviors(ser):
     """
     q = studio_pb2.Request(request_id=10)
     q.behaviors.list_all_behaviors = True
-    ids = list(_call(ser, q).request_response.behaviors.list_all_behaviors.behaviors)
+    ids = list(_call(ser, q, expect="behaviors.list_all_behaviors")
+               .request_response.behaviors.list_all_behaviors.behaviors)
+    if not ids:
+        # An empty table renders every key as "unnameable", which the legend
+        # tells the user is "Not a difference" -- a total protocol failure
+        # reading as a healthy board.
+        raise RpcError("protocol", "The keyboard listed no behaviours.")
 
     out = {}
     for n, bid in enumerate(ids):
         q = studio_pb2.Request(request_id=100 + n)
         q.behaviors.get_behavior_details.behavior_id = bid
-        d = _call(ser, q).request_response.behaviors.get_behavior_details
+        d = (_call(ser, q, expect="behaviors.get_behavior_details")
+             .request_response.behaviors.get_behavior_details)
         out[bid] = {"name": d.display_name,
                     "param1": _param_descs(d, "param1"),
                     "param2": _param_descs(d, "param2")}
@@ -176,5 +224,8 @@ def read_board(port):
                            "The keyboard is locked. Press the unlock chord to continue.")
         q = studio_pb2.Request(request_id=2)
         q.keymap.get_keymap = True
-        km = _call(ser, q, timeout=10.0).request_response.keymap.get_keymap
+        km = (_call(ser, q, timeout=10.0, expect="keymap.get_keymap")
+              .request_response.keymap.get_keymap)
+        if not km.layers:
+            raise RpcError("protocol", "The keyboard returned a keymap with no layers.")
         return km, read_behaviors(ser)

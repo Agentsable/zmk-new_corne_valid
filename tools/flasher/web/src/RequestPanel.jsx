@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-
-// The bundle this page was loaded from. A tab left open across a rebuild keeps
-// running the old code; the server compares this and refuses to deploy for it.
-const BUILD = import.meta.url.split("/").pop();
+import useFlasherState from "./useFlasherState.js";
+import { startDeploy } from "./start.js";
+import { queueAdd, queueClear, queueFlush, queueList } from "./queue.js";
 
 /** Right-hand panel: everything queued for the next firmware update.
  *
@@ -12,18 +11,56 @@ const BUILD = import.meta.url.split("/").pop();
  * keymap against the last deploy, so the panel cannot disagree with reality.
  */
 export default function RequestPanel({ pending = [], onAdd, onDiscard, onSaved, busy }) {
-  const [req, setReq] = useState(null);
+  const req = useFlasherState();
   const [starting, setStarting] = useState(false);
   const [err, setErr] = useState("");
+  const [queued, setQueued] = useState([]);
+  const [qbusy, setQbusy] = useState(false);
+  const down = Boolean(req?.local_down);
 
-  const refresh = useCallback(() => {
-    fetch("/api/state").then((r) => r.json()).then(setReq).catch(() => {});
+  const loadQueue = useCallback(async () => {
+    const r = await queueList();
+    setQueued(r.ok ? (r.items ?? []) : []);
   }, []);
-  useEffect(() => {
-    refresh();
-    const id = setInterval(refresh, 1500);
-    return () => clearInterval(id);
-  }, [refresh]);
+  useEffect(() => { loadQueue(); }, [loadQueue, down]);
+
+  // With the Mac off there is nothing to write to, so park the edits in the
+  // worker against the sha they were composed on.
+  const stash = async () => {
+    setQbusy(true); setErr("");
+    const sha = req?.request?.sha || "";
+    for (const p of pending) {
+      const r = await queueAdd({ layer: p.layer, index: p.index,
+                                 binding: p.binding, coord: p.coord ?? null,
+                                 base_sha: sha });
+      if (!r.ok) { setErr(r.error || "Could not queue the change."); break; }
+    }
+    await loadQueue();
+    setQbusy(false);
+    onDiscard?.();
+  };
+
+  const applyQueue = async () => {
+    setQbusy(true); setErr("");
+    const r = await queueFlush();
+    if (!r.ok) {
+      setErr(r.kind === "conflict"
+        ? "The keymap changed since these were queued, so nothing was written. "
+          + "Discard them and make the changes again."
+        : (r.error || "Could not apply the queued changes."));
+    } else {
+      onSaved?.();
+    }
+    await loadQueue();
+    setQbusy(false);
+  };
+
+  const dropQueue = async () => {
+    setQbusy(true);
+    await queueClear();
+    await loadQueue();
+    setQbusy(false);
+  };
 
   const running = req && !["idle", "error", "done"].includes(req.phase);
   const onDisk = req?.request?.open;
@@ -71,16 +108,12 @@ export default function RequestPanel({ pending = [], onAdd, onDiscard, onSaved, 
       }
       onSaved?.();
     }
-    const r = await fetch("/api/start", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, build: BUILD }),
-    });
-    const j = await r.json().catch(() => ({}));
+    const r = await startDeploy(name);
     setStarting(false);
-    if (j.error) setErr(j.error); else location.hash = "deploy";
+    if (!r.ok) setErr(r.error); else location.hash = "deploy";
   };
 
-  const nothing = !pending.length && !onDisk;
+  const nothing = !pending.length && !onDisk && !queued.length;
 
   return (
     <aside className="reqpanel">
@@ -101,8 +134,9 @@ export default function RequestPanel({ pending = [], onAdd, onDiscard, onSaved, 
             ))}
           </ul>
           <div className="rp-actions">
-            <button className="primary" disabled={busy} onClick={onAdd}>
-              {busy ? "Adding…" : "Add to request"}
+            <button className="primary" disabled={busy || qbusy}
+                    onClick={down ? stash : onAdd}>
+              {busy || qbusy ? "Adding…" : down ? "Queue until connected" : "Add to request"}
             </button>
             <button onClick={onDiscard}>Discard</button>
           </div>
@@ -116,9 +150,31 @@ export default function RequestPanel({ pending = [], onAdd, onDiscard, onSaved, 
         </>
       )}
 
+      {queued.length > 0 && (
+        <>
+          <span className="rp-head">Queued offline ({queued.length})</span>
+          <ul className="rp-list">
+            {queued.map((q) => (
+              <li key={`${q.layer}:${q.index}`}>
+                <code className="rp-coord">{q.coord ?? q.index}</code>
+                <span className="rp-layer">{q.layer}</span>
+                <code className="rp-bind">{q.binding}</code>
+              </li>
+            ))}
+          </ul>
+          <div className="rp-actions">
+            <button className="primary" disabled={qbusy || down} onClick={applyQueue}>
+              {qbusy ? "Applying…" : down ? "Waiting for the flasher" : "Apply queued changes"}
+            </button>
+            <button disabled={qbusy} onClick={dropQueue}>Discard</button>
+          </div>
+        </>
+      )}
+
       <div className="rp-foot">
         <span className="rp-name" title={name}>{name}</span>
-        <button className="primary" disabled={nothing || running || starting} onClick={send}>
+        <button className="primary"
+                disabled={nothing || running || starting || down} onClick={send}>
           {running ? "Update running…" : starting ? "Starting…" : "Send update request"}
         </button>
         {err && <p className="err">{err}</p>}

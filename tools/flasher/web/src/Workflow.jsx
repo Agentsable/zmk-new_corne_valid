@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import useFlasherState from "./useFlasherState.js";
+import { startDeploy } from "./start.js";
 
 // server step status -> flag colour
 const FLAG = { todo: "blank", run: "orange", fail: "red", ok: "green" };
@@ -10,16 +12,10 @@ function Flag({ status }) {
 }
 
 export default function Workflow() {
-  const [s, setS] = useState(null);
+  const s = useFlasherState();
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    const tick = async () => { try { setS(await (await fetch("/api/state")).json()); } catch {} };
-    tick();
-    const id = setInterval(tick, 700);
-    return () => clearInterval(id);
-  }, []);
+  const [err, setErr] = useState("");
 
   if (!s) return <div className="page" />;
 
@@ -27,14 +23,17 @@ export default function Workflow() {
   const v = s.version;
   const steps = s.steps || [];
 
+  // finally, not a trailing setBusy: a rejected fetch used to skip it and freeze
+  // the button on "Starting..." for the life of the page.
   const start = async () => {
     if (!name.trim()) return;
-    setBusy(true);
-    await fetch("/api/start", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: name.trim() }),
-    });
-    setBusy(false);
+    setBusy(true); setErr("");
+    try {
+      const r = await startDeploy(name.trim());
+      if (!r.ok) setErr(r.error);
+    } finally {
+      setBusy(false);
+    }
   };
 
   // only the pending version is shown -- no history on this page
@@ -42,15 +41,23 @@ export default function Workflow() {
     return (
       <div className="page">
         <h1>Deployment workflow</h1>
-        <p className="none">No pending version.</p>
+        {s.local_down ? (
+          <p className="err">The local flasher is unreachable, so whether a
+            version is pending cannot be read. Start nothing from this page
+            until the indicator turns green.</p>
+        ) : (
+          <p className="none">No pending version.</p>
+        )}
         <div className="namerow">
           <input value={name} onChange={(e) => setName(e.target.value)}
             placeholder="Version name, e.g. joystick-tuning"
             onKeyDown={(e) => e.key === "Enter" && start()} />
-          <button className="primary" disabled={busy || !name.trim()} onClick={start}>
+          <button className="primary"
+            disabled={busy || !name.trim() || Boolean(s.local_down)} onClick={start}>
             {busy ? "Starting…" : "Generate version"}
           </button>
         </div>
+        {err && <p className="err">{err}</p>}
       </div>
     );
   }
@@ -81,7 +88,7 @@ export default function Workflow() {
       {s.error && <p className="err">{s.error}</p>}
       {s.phase === "done" && <p className="ok">Deployment complete.</p>}
 
-      {running && (
+      {(running || s.phase === "error") && (
         <pre className="wlog">{(s.log || []).slice(-14).join("\n") || "…"}</pre>
       )}
 
@@ -89,11 +96,13 @@ export default function Workflow() {
         <div className="namerow">
           <input value={name} onChange={(e) => setName(e.target.value)}
             placeholder="New version name" onKeyDown={(e) => e.key === "Enter" && start()} />
-          <button className="primary" disabled={busy || !name.trim()} onClick={start}>
+          <button className="primary"
+            disabled={busy || !name.trim() || Boolean(s.local_down)} onClick={start}>
             Generate new version
           </button>
         </div>
       )}
+      {err && <p className="err">{err}</p>}
     </div>
   );
 }

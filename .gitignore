@@ -25,6 +25,8 @@ tools/flasher/pkg/
 tools/flasher/__pycache__/
 tools/flasher/state.json
 tools/flasher/server.log
+# audit trail written by log(); useful locally, not history
+tools/flasher/audit.log
 
 # --- unrelated / scratch -----------------------------------------------------
 # Vial files for a different keyboard

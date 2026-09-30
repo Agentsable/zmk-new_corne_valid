@@ -46,15 +46,59 @@ OVERLAY = "/workspace/boards/shields/eyelash_corne/oled.dtsi"
 SHIELDS = {"left": "eyelash_corne_left nice_oled", "right": "eyelash_corne_right nice_oled"}
 
 LOCK = threading.Lock()
+# /api/save is read-modify-write on one file under a threading HTTP server. Two
+# clients saving at once lost one set of edits and recorded a description that
+# belonged to the other -- the same "named after changes it does not contain"
+# failure this tool already had once.
+SAVE_LOCK = threading.Lock()
 STATE = {"phase": "idle", "left": "blank", "right": "blank", "log": [], "error": "",
          "version": None, "steps": []}
 
 # workflow steps, in order; the UI renders these with their status
-STEPS = [("predeploy", "Commit + push predeploy version"),
-         ("build", "Build both halves"),
+STEPS = [("build", "Build both halves"),
+         ("predeploy", "Commit + push predeploy version"),
          ("right", "Flash right half"),
          ("left", "Flash left half"),
          ("deployed", "Commit + push deployed version")]
+
+
+def run_streaming(cmd, timeout, keep, cwd=None):
+    """Run cmd, log the lines matching `keep`, and return its exit code or None.
+
+    Iterating p.stdout blocks with no timeout of its own, so the p.wait(timeout=)
+    that used to follow it was unreachable: a Docker build that stalled or an
+    nrfutil blocked on a serial read from an unplugged board hung the workflow
+    thread forever, with the UI showing a live-looking log that never advanced.
+    A watchdog that kills the child is what makes the read loop end.
+    """
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         text=True, bufsize=1, cwd=cwd)
+    timed_out = []
+
+    def kill():
+        timed_out.append(True)
+        for shot in (p.terminate, p.kill):
+            try:
+                shot()
+            except Exception:
+                pass
+            if p.poll() is not None:
+                return
+            time.sleep(2)
+
+    watchdog = threading.Timer(timeout, kill)
+    watchdog.daemon = True
+    watchdog.start()
+    try:
+        for line in p.stdout:
+            keep(line.rstrip())
+        rc = p.wait()
+    finally:
+        watchdog.cancel()
+    if timed_out:
+        log(f"timed out after {timeout}s and was killed: {cmd[0]}")
+        return None
+    return rc
 
 
 def step(key, status, detail=""):
@@ -105,25 +149,37 @@ def build_halves():
         script.append(f'echo BUILT {side}')
     cmd = ["docker", "run", "--rm", "-v", f"{REPO}:/workspace", "-w", "/workspace",
            DOCKER_IMAGE, "bash", "-c", "\n".join(script)]
+    def keep(line):
+        if re.search(r"BUILT |error|Error|FLASH:|Wrote ", line):
+            log(line)
     try:
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                             text=True, bufsize=1)
-        for line in p.stdout:
-            line = line.rstrip()
-            if re.search(r"BUILT |error|Error|FLASH:|Wrote ", line):
-                log(line)
-        if p.wait(timeout=1800) != 0:
+        if run_streaming(cmd, 1800, keep) != 0:
             return False
     except Exception as e:
         log(f"build failed: {e}")
         return False
+    # genpkg sat outside the try, and unlike flash() nothing here checked that
+    # NRFUTIL is set -- so `./deploy.py name`, which runs on the system
+    # interpreter where run.sh has exported nothing, crashed here AFTER the
+    # predeploy tag was already pushed.
+    if not (NRFUTIL and os.path.exists(NRFUTIL)):
+        log("no adafruit-nrfutil: set NRFUTIL or start the flasher with ./run.sh")
+        return False
+    if not PKG_DIR:
+        log("no PKG_DIR: set it or start the flasher with ./run.sh")
+        return False
+    os.makedirs(PKG_DIR, exist_ok=True)
     # repackage for DFU straight from the fresh hex
     for side in SHIELDS:
         hexf = os.path.join(REPO, HEX[side])
         pkg = os.path.join(PKG_DIR, PKG[side])
-        r = subprocess.run([NRFUTIL, "dfu", "genpkg", "--dev-type", "0x0052",
-                            "--application", hexf, pkg],
-                           capture_output=True, text=True, timeout=120)
+        try:
+            r = subprocess.run([NRFUTIL, "dfu", "genpkg", "--dev-type", "0x0052",
+                                "--application", hexf, pkg],
+                               capture_output=True, text=True, timeout=120)
+        except Exception as e:
+            log(f"genpkg {side} failed: {e}")
+            return False
         if r.returncode != 0:
             log(f"genpkg {side} failed: {r.stderr.strip()}")
             return False
@@ -196,6 +252,7 @@ def basic_credentials():
     except Exception:
         return "", ""
 STATE_FILE = os.path.join(ROOT, "state.json")
+AUDIT_LOG = os.path.join(ROOT, "audit.log")
 
 
 def keymap_sha():
@@ -275,6 +332,14 @@ def log(msg):
     with LOCK:
         STATE["log"].append(f"{time.strftime('%H:%M:%S')}  {msg}")
         del STATE["log"][:-200]
+    # STATE["log"] is capped at 200 and dies with the process, so _audit's record
+    # of every mutating request and the "refused remote request" security line
+    # vanish exactly when they would be wanted. Append somewhere that survives.
+    try:
+        with open(AUDIT_LOG, "a", encoding="utf-8") as fh:
+            fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {msg}\n")
+    except OSError:
+        pass        # a broken audit file must never take down a request
 
 
 def setk(**kw):
@@ -291,19 +356,20 @@ def flash(side, port):
            "-b", "115200", "--singlebank"]
     log(f"flashing {side} on /dev/{port}")
     programmed = False
+    def keep(line):
+        nonlocal programmed
+        # the progress bar is thousands of '#' -- keep the meaningful lines
+        if line and not set(line) <= {"#"}:
+            log(line)
+        if "Device programmed" in line:
+            programmed = True
     try:
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                             text=True, bufsize=1, cwd=REPO)
-        for line in p.stdout:
-            line = line.rstrip()
-            # the progress bar is thousands of '#' -- keep the meaningful lines
-            if line and not set(line) <= {"#"}:
-                log(line)
-            if "Device programmed" in line:
-                programmed = True
-        rc = p.wait(timeout=240)
+        rc = run_streaming(cmd, 240, keep, cwd=REPO)
     except Exception as e:
         log(f"{side} failed: {e}")
+        return False
+    if rc is None:
+        log(f"{side}: FAILED (nrfutil stopped responding and was killed)")
         return False
     # adafruit-nrfutil exits 0 even when the transfer dies, so the exit code
     # alone is not evidence -- require its success line.
@@ -345,7 +411,10 @@ def flash_half(side):
     for attempt in range(3):
         if attempt:
             time.sleep(2.0)
-            again = bootloader_port([])
+            # baseline, not [] -- with an empty baseline every cu.usbmodem* is
+            # "fresh" and sorted()[0] wins, which can point nrfutil at a board
+            # that is running its firmware and kill it mid-write.
+            again = bootloader_port(baseline)
             if not again:
                 log(f"{side}: bootloader went away before the retry")
                 break
@@ -379,9 +448,28 @@ def workflow(name):
         setk(phase="error", error=msg)
         log(f"workflow aborted: {msg}")
 
-    # 1. predeploy commit + push
+    # 1. build FIRST. This used to run after the predeploy push, so a build
+    # failure left origin/main advertising a keymap no board runs -- and
+    # /api/keymap?current reads HEAD, so "Current keymap" showed keys that were
+    # never flashed. Nothing reaches the remote now unless it compiled.
+    step("build", "run")
+    setk(phase="build")
+    if not build_halves():
+        return fail("build", "firmware build failed")
+    step("build", "ok", "both halves built and packaged")
+
+    # 2. predeploy commit + push
     step("predeploy", "run")
     setk(phase="predeploy")
+    # Docker builds the working tree, not the commit, so anything dirty outside
+    # the keymap is in the firmware but not in the tag. Say so rather than let
+    # the tag quietly misdescribe what shipped.
+    ok_st, dirty = git("status", "--porcelain")
+    extra = [l for l in dirty.splitlines()
+             if l[3:].strip() and not l[3:].strip().endswith("eyelash_corne.keymap")]
+    if ok_st and extra:
+        log(f"warning: {len(extra)} uncommitted file(s) are in this build but not "
+            f"in the tag: {', '.join(l[3:].strip() for l in extra[:5])}")
     git("add", "config/eyelash_corne.keymap")
     okc, out = git("commit", "-m", pre)
     # A clean tree is normal: a version may tag an unchanged keymap. git words
@@ -409,13 +497,6 @@ def workflow(name):
     step("predeploy", "ok", pre)
     log(f"predeploy pushed and verified on remote: {pre}")
 
-    # 2. build immediately after the predeploy push
-    step("build", "run")
-    setk(phase="build")
-    if not build_halves():
-        return fail("build", "firmware build failed")
-    step("build", "ok", "both halves built and packaged")
-
     # 3. flash right, then left
     for side in ("right", "left"):
         step(side, "run")
@@ -426,53 +507,54 @@ def workflow(name):
     # 4. deployed commit + push
     step("deployed", "run")
     setk(phase="deployed")
-    git("tag", "-f", "-a", done_tag, "-m", f"Deployed {ts} {safe}")
-    git("push", "origin", "main")
+    okt, out = git("tag", "-f", "-a", done_tag, "-m", f"Deployed {ts} {safe}")
+    if not okt:
+        return fail("deployed", f"tag failed: {out.splitlines()[-1] if out else ''}")
+    # This push used to be called bare. A failed one is invisible -- the tag push
+    # below still ships the objects, so remote_has_tag passes and the page prints
+    # "Deployment complete." while origin/main still points at the old keymap.
+    okm, out = git("push", "origin", "main")
+    if not okm:
+        return fail("deployed", f"push failed: {out.splitlines()[-1] if out else ''}")
     okp, out = git("push", "-f", "origin", f"refs/tags/{done_tag}")
     if not okp or not remote_has_tag(done_tag):
         return fail("deployed", f"tag push failed: {out.splitlines()[-1] if out else ''}")
     step("deployed", "ok", done_tag)
     log(f"deployed pushed and verified on remote: {done_tag}")
 
-    setk(phase="done")
     st = load_state()
     st["last_deploy"] = {"at": time.time(), "sha": keymap_sha(),
                          "description": request_info()["description"] or safe,
                          "version": done_tag}
     st.pop("pending", None)
     save_state(st)
+    # after save_state: "done" used to be set first, so a failed write left the
+    # UI saying complete while the request stayed open and notify.js re-fired.
+    setk(phase="done")
     log(f"deployed: {done_tag}")
 
 
-def sequence():
-    """Both halves, in order: right first, then left."""
-    for side in ("right", "left"):   # right first, then left
-        # the previous half's bootloader must be gone before arming the next
-        if wait_for(lambda: volume() is None, 60) is None:
-            log("previous bootloader volume never unmounted")
-        baseline = ports()
-        setk(**{side: "red"}, phase=f"{side}_wait")
-        log(f"{side}: waiting for bootloader -- double-tap reset (baseline {baseline})")
-        port = wait_for(lambda: bootloader_port(baseline), WAIT_TIMEOUT)
-        if not port:
-            log(f"{side}: timed out waiting for the bootloader")
-            setk(**{side: "red"}, phase="error", error=f"{side} half never entered DFU")
-            return
-        setk(**{side: "orange"}, phase=f"{side}_flash")
-        log(f"{side}: bootloader on /dev/{port}")
-        if not flash(side, port):
-            setk(**{side: "orange"}, phase="error", error=f"{side} half failed to flash")
-            return
-        setk(**{side: "green"})
-        log(f"{side}: programmed")
-    setk(phase="done")
-    req = request_info()
-    st = load_state()
-    st["last_deploy"] = {"at": time.time(), "sha": keymap_sha(),
-                         "description": req["description"] or head_subject()}
-    st.pop("pending", None)
-    save_state(st)
-    log("both halves programmed")
+def guarded(fn):
+    """Run the workflow so it can never leave the phase mid-flight.
+
+    /api/start refuses anything whose phase is not idle/error/done, and nothing
+    used to reset it: one escaping exception (a git timeout, an unguarded
+    save_state) wedged the tool at phase="build" until the process restarted,
+    with the UI showing a frozen step list and no error.
+    """
+    def run():
+        try:
+            fn()
+        except Exception as e:
+            log(f"update crashed: {e!r}")
+            setk(phase="error", error=f"The update stopped unexpectedly: {e}")
+        finally:
+            with LOCK:
+                if STATE["phase"] not in ("done", "error"):
+                    STATE["phase"] = "error"
+                    STATE["error"] = (STATE["error"]
+                                      or "The update stopped without finishing.")
+    return run
 
 
 class H(BaseHTTPRequestHandler):
@@ -556,9 +638,18 @@ class H(BaseHTTPRequestHandler):
             try:
                 if src == "current":
                     # what the board is running == what was committed when flashed
-                    text = subprocess.run(
+                    r = subprocess.run(
                         ["git", "show", "HEAD:config/eyelash_corne.keymap"], cwd=REPO,
-                        capture_output=True, text=True, timeout=10).stdout
+                        capture_output=True, text=True, timeout=10)
+                    # A failed `git show` exits 128 with EMPTY stdout, and parse("")
+                    # returns layers=[] with a full layout and rc -- a 200 that the
+                    # coordinate card renders confidently with 27 of 48 labels
+                    # renumbered. Never let the empty string through as a keymap.
+                    if r.returncode != 0 or not r.stdout.strip():
+                        return self._send(500, {"error":
+                            "Could not read the committed keymap from git: "
+                            + ((r.stderr or "").strip() or "no output")})
+                    text = r.stdout
                 else:
                     text = open(f).read()
                 data = keymap_mod.parse(text, REPO)
@@ -628,8 +719,12 @@ class H(BaseHTTPRequestHandler):
                     return self._send(409, {"error": "already running"})
                 STATE.update(phase="starting", left="blank", right="blank",
                              log=[], error="")
-            target = (lambda: workflow(name)) if name else sequence
-            threading.Thread(target=target, daemon=True).start()
+            # An unnamed update used to run sequence(), which never built: it
+            # flashed the packages left in PKG_DIR by an earlier build, then
+            # recorded the CURRENT keymap as deployed and closed the request.
+            # There is one path now, and it always builds what it flashes.
+            threading.Thread(target=guarded(lambda: workflow(name)),
+                             daemon=True).start()
             return self._send(200, {"ok": True, "named": bool(name)})
         if self.path.startswith("/api/keymap"):
             try:
@@ -643,16 +738,18 @@ class H(BaseHTTPRequestHandler):
                 edits = body.get("edits") or []
                 if not edits:
                     return self._send(400, {"error": "no edits"})
-                text = keymap_mod.set_bindings(open(KEYMAP).read(), edits)
-                open(KEYMAP, "w").write(text)
+                with SAVE_LOCK:
+                    text = keymap_mod.set_bindings(open(KEYMAP).read(), edits)
+                    with open(KEYMAP, "w") as fh:
+                        fh.write(text)
+                    st = load_state()
+                    st["pending"] = {
+                        "description": (body.get("description") or "").strip()
+                                       or f"Edited {len(edits)} key(s) via the flasher",
+                        "at": time.time(), "sha": keymap_sha()}
+                    save_state(st)
             except Exception as e:
                 return self._send(400, {"error": str(e)})
-            st = load_state()
-            st["pending"] = {
-                "description": (body.get("description") or "").strip()
-                               or f"Edited {len(edits)} key(s) via the flasher",
-                "at": time.time(), "sha": keymap_sha()}
-            save_state(st)
             log(f"keymap saved: {len(edits)} edit(s) -> " +
                 ", ".join(f"{e.get('layer')}[{e.get('index')}]={e.get('binding')}"
                           for e in edits[:6]))

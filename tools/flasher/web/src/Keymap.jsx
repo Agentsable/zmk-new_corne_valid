@@ -63,6 +63,11 @@ export default function Keymap({ source, editable, onSaved }) {
       .catch((e) => setErr(String(e)));
   }, [source]);
 
+  // The worker sets these when it serves its KV copy because the Mac is down.
+  // Nothing read them, so cached keys rendered identically to live ones -- the
+  // same shape as the bugs that already cost two deploys.
+  const staleAt = d?.stale ? new Date(d.stale_at).toLocaleString() : null;
+
   useEffect(() => { setD(null); setEdits({}); setSel(null); load(); }, [load]);
 
   if (err) return <p className="err">{err}</p>;
@@ -110,6 +115,11 @@ export default function Keymap({ source, editable, onSaved }) {
 
   return (
     <>
+      {staleAt && (
+        <p className="err stale">Cached copy from {staleAt}. The local flasher is
+          unreachable, so this is not known to be what the board is running —
+          and an edit made against it may not apply cleanly.</p>
+      )}
       {editable && sel && (
         <div className="editbar">
           <span className="editwho">{sel.layer} · key {sel.index}</span>

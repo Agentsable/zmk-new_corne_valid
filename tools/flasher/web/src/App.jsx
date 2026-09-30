@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { askPermission, notifyOnChange, permission } from "./notify.js";
+import useFlasherState from "./useFlasherState.js";
+import { refreshState } from "./flasherState.js";
 import Deploy from "./Deploy.jsx";
 import Keymap from "./Keymap.jsx";
 import RequestCard from "./Request.jsx";
@@ -32,22 +34,16 @@ export default function App() {
     addEventListener("hashchange", onHash);
     return () => removeEventListener("hashchange", onHash);
   }, []);
-  const [req, setReq] = useState(null);
   const [perm, setPerm] = useState(permission());
   const prevState = useRef(null);
+  const state = useFlasherState();
+  const req = state?.request ?? null;
 
-  const refresh = useCallback(() => {
-    fetch("/api/state").then((r) => r.json()).then((j) => {
-      setReq(j.request);
-      notifyOnChange(prevState.current, j);
-      prevState.current = j;
-    }).catch(() => {});
-  }, []);
   useEffect(() => {
-    refresh();
-    const id = setInterval(refresh, 1500);
-    return () => clearInterval(id);
-  }, [refresh]);
+    if (!state) return;
+    notifyOnChange(prevState.current, state);
+    prevState.current = state;
+  }, [state]);
 
   return (
     <div className="shell">
@@ -101,7 +97,7 @@ export default function App() {
                     description={req.last.description} label="Last update deployed" />}
                 </>}
             <p className="blurb">Click any key to change its binding, then save to open a new request.</p>
-            <Keymap source="pending" editable onSaved={refresh} />
+            <Keymap source="pending" editable onSaved={refreshState} />
           </div>
         )}
       </main>

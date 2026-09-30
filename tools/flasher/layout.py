@@ -10,9 +10,16 @@ LAYOUTS = "boards/shields/eyelash_corne/eyelash_corne-layouts.dtsi"
 SHIELD = "boards/shields/eyelash_corne/eyelash_corne.dtsi"
 RIGHT_OVERLAY = "boards/shields/eyelash_corne/eyelash_corne_right.overlay"
 
+# Every numeric field takes the same parenthesised-negative form devicetree
+# uses for rot. rx/ry accepted only bare positives, so one mirrored layout --
+# the form upstream ZMK layouts routinely use -- dropped keys from the parse
+# and surfaced as an opaque "layout has 47 keys, transform has 48".
+_NUM = r"(\(?-?\d+\)?)"
 KEY_RE = re.compile(
-    r"key_physical_attrs\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\(?-?\d+\)?)\s+(\d+)\s+(\d+)")
-RC_RE = re.compile(r"RC\((\d+),(\d+)\)")
+    r"key_physical_attrs\s+" + r"\s+".join([_NUM] * 7))
+# RC(0, 0) with a space is legal C and common upstream; without \s* the spaced
+# entries were dropped silently, one by one.
+RC_RE = re.compile(r"RC\(\s*(\d+)\s*,\s*(\d+)\s*\)")
 
 
 def _n(tok):
@@ -49,8 +56,10 @@ def col_offset(repo):
         text = read(repo, RIGHT_OVERLAY)
     except OSError:
         return None
-    m = re.search(r"col-offset\s*=\s*<(\d+)>", text)
-    return int(m.group(1)) if m else None
+    # hex is legal devicetree: <0x7> parsed as "no right half at all", which
+    # silently unflags the rotary key and renumbers the left thumb row.
+    m = re.search(r"col-offset\s*=\s*<\s*(0[xX][0-9a-fA-F]+|\d+)\s*>", text)
+    return int(m.group(1), 0) if m else None
 
 
 def has_left_encoder(repo):
@@ -102,7 +111,8 @@ def analyse(repo):
     # left-half key -- the encoder sits in the gap between the halves. Measured,
     # not indexed, so it survives a layout change.
     off = col_offset(repo)
-    if off:
+    # `if off:` treated a legal col-offset of 0 as missing
+    if off is not None:
         left = [i for i, (r, c) in enumerate(rc) if c < off]
         # ponytail: the encoder push is the innermost left-half key -- it sits in
         # the gap between the halves, past every other left key. Holds while the

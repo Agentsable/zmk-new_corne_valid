@@ -29,10 +29,18 @@ def binding_to_source(behavior_id, param1, param2, behaviors):
     if label is None:
         return None
     parts = ["&" + label]
-    for slot, val in (("param1", param1), ("param2", param2)):
-        descs = [d for d in info.get(slot, []) if d.get("kind") != "nil"]
+    slots = [([d for d in info.get(slot, []) if d.get("kind") != "nil"], val)
+             for slot, val in (("param1", param1), ("param2", param2))]
+    # Trailing empty slots are simply absent parameters. An empty slot with a
+    # populated one AFTER it is different: appending positionally promoted
+    # param2 into param1's place and rendered "&my_ht Q" for "&my_ht 0 Q" -- a
+    # false diff whose adopted form does not build. Reachable through hold-taps
+    # whose hold child carries empty metadata (&trans, &caps_word, &soft_off).
+    while slots and not slots[-1][0]:
+        slots.pop()
+    for descs, val in slots:
         if not descs:
-            continue
+            return None          # cannot place the parameters; unknown, not wrong
         text = _render_param(descs, val)
         if text is None:
             return None          # unnameable param -> unknown, not a false change
@@ -49,6 +57,13 @@ def _render_param(descs, val):
     if "hid_usage" in kinds:
         return zmk_decode.decode_keycode(val)
     if "layer_id" in kinds:
+        return str(val)
+    if "range" in kinds:
+        # &mmv and &msc are input_two_axis, whose param1 the firmware declares
+        # as RANGE ("X Y", 0..UINT32_MAX). It was unhandled, so all ten pointer
+        # keys fell through to None and the page called them "unnameable" --
+        # which the legend tells the reader is "Not a difference". It is a
+        # plain integer; spell it and it compares like anything else.
         return str(val)
     if kinds == {"constant"}:
         return None              # a constant slot with no matching value
@@ -78,6 +93,11 @@ def _canon(text):
             # are one value under two names, exactly like RCTRL and RCTL
             v = zmk_decode.constants().get(tok)
         if v is None:
+            # keys.h aliases like EXCL resolve to LS(N1) and encode_keycode
+            # returns None for them, so the board's decoded LS(N1) could never
+            # match the source spelling and that key read as changed forever.
+            v = zmk_decode.encode_alias(tok)
+        if v is None:
             v = int(tok) if tok.lstrip("-").isdigit() else tok
         vals.append(v)
     return (toks[0].lstrip("&"), tuple(vals))
@@ -101,14 +121,33 @@ def diff(source_layers, board_layers, behaviors, rejected=()):
     out = []
     for i, board in enumerate(board_layers):
         src = source_layers[i] if i < len(source_layers) else None
+        # A layer the board has and source does not used to force changed=False
+        # for every key, so a layer added in Studio rendered "in sync" -- the
+        # exact case this page exists to catch.
+        extra_layer = src is None
         keys = []
-        for j, b in enumerate(board.get("bindings", [])):
+        # Compare the union: iterating only the board's bindings silently
+        # dropped any position a truncated layer failed to report, and the grid
+        # still looked complete.
+        width = max(len(board.get("bindings", [])), len(src["keys"]) if src else 0)
+        for j in range(width):
+            blist = board.get("bindings", [])
+            b = blist[j] if j < len(blist) else None
             s_txt = src["keys"][j]["binding"] if src and j < len(src["keys"]) else None
-            b_txt = binding_to_source(b.get("behavior_id", 0), b.get("param1", 0),
-                                      b.get("param2", 0), behaviors)
+            b_txt = (binding_to_source(b.get("behavior_id", 0), b.get("param1", 0),
+                                       b.get("param2", 0), behaviors)
+                     if b is not None else None)
             key = f"{i}/{j}"
-            unknown = b_txt is None
-            changed = (not unknown) and s_txt is not None and not _same(s_txt, b_txt)
+            missing = b is None
+            unknown = b_txt is None and not missing
+            if missing:
+                # the board never reported this position
+                changed = s_txt is not None
+            elif extra_layer:
+                # nothing to compare against: the whole layer is new on the board
+                changed = b_txt is not None
+            else:
+                changed = (not unknown) and s_txt is not None and not _same(s_txt, b_txt)
             if not changed and not unknown:
                 b_txt = s_txt      # same key, different spelling: show one form
             keys.append({
@@ -117,6 +156,7 @@ def diff(source_layers, board_layers, behaviors, rejected=()):
                 "board": b_txt,
                 "changed": changed,
                 "unknown": unknown,
+                "missing": missing,
                 "rejected": key in rejected,
             })
         out.append({

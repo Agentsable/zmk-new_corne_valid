@@ -84,17 +84,29 @@ export default function ZmkUpdate() {
   }
 
   async function decide(adopt) {
-    if (!sel) return;
-    const r = await fetch("/api/zmk/decide", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: sel.key, adopt, binding: sel.k.board }),
-    });
-    const j = await r.json();
-    if (!r.ok) { setErr(j); return; }
-    setSel(null);
-    // adopting rewrites source, so the diff has to come from the board again
-    if (adopt) await read(); else await read();
+    // busy is also the in-flight guard: without it a double-click fired two
+    // adopts, and a rejected fetch left the dialog sitting there with no error
+    // and no way to tell whether the keymap had been rewritten.
+    if (!sel || busy) return;
+    setBusy(true);
+    try {
+      const r = await fetch("/api/zmk/decide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: sel.key, adopt, binding: sel.k.board }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(j.error ? j : { kind: "failed", error: `Adopt failed (${r.status}).` }); return; }
+      setSel(null);
+    } catch (e) {
+      setErr({ kind: "failed", error: `Could not reach the flasher: ${e}` });
+      return;
+    } finally {
+      setBusy(false);
+    }
+    // either way the source may have moved, so re-read rather than trust the
+    // diff that is on screen
+    await read();
   }
 
   const total = (layers ?? []).reduce((n, l) => n + l.changed, 0);

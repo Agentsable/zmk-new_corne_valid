@@ -33,7 +33,7 @@ _DEFINE = re.compile(r"^\s*#define\s+([A-Za-z_]\w*)\s+(.+?)\s*(?://.*)?$", re.M)
 def _defines(*names):
     out = {}
     for n in names:
-        path = os.path.join(DTB, n)
+        path = n if os.path.isabs(n) else os.path.join(DTB, n)
         if not os.path.exists(path):
             continue
         text = open(path, encoding="utf-8", errors="replace").read()
@@ -49,6 +49,36 @@ def _defines(*names):
 @functools.lru_cache(maxsize=1)
 def _raw():
     return _defines("hid_usage_pages.h", "hid_usage.h", "keys.h")
+
+
+@functools.lru_cache(maxsize=1)
+def _params():
+    """Names defined by the headers that are NOT keycodes.
+
+    `&mmv MOVE_UP` and `&bt BT_SEL` are legal bindings whose parameters live in
+    pointing.h and bt.h, so known_keycode() -- which only reads keys.h -- says
+    False for both. Checking those against keys.h would reject the keymap's own
+    working bindings.
+
+    The keymap is scanned last for the same reason behaviors() scans it: this
+    one #defines SLOW_UP/SLOW_DOWN/SLOW_LEFT/SLOW_RIGHT and binds them with
+    &mmv, and no upstream header has ever heard of them.
+    """
+    return _defines("pointing.h", "mouse.h", "bt.h", "rgb.h", "outputs.h",
+                    "ext_power.h", "backlight.h", "reset.h",
+                    os.path.join(ROOT, "config", "eyelash_corne.keymap"))
+
+
+def known_param(text):
+    """True when ZMK defines this name anywhere dtc will resolve it.
+
+    Same question as known_keycode, widened past keys.h: not "what integer is
+    this" but "will the build accept the symbol".
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    return t in _params() or known_keycode(t)
 
 
 def _resolve(expr, seen=()):
@@ -95,24 +125,53 @@ def constants():
     resolve to the same number or one key reads as an edit nobody made.
     """
     out = {}
-    for name, expr in _defines("pointing.h").items():
+    for name, expr in _pointing_defines().items():
         v = _resolve_pointing(name, expr)
         if v is not None:
             out[name] = v
     return out
 
 
+@functools.lru_cache(maxsize=1)
+def _pointing_defines():
+    """pointing.h's names, with THIS keymap's overrides taking precedence.
+
+    pointing.h guards its defaults with #ifndef and the keymap sets
+    ZMK_POINTING_DEFAULT_MOVE_VAL to 1200 before including it, so the board
+    packs MOVE_UP from 1200 and not the header's 600. _defines keeps the first
+    definition it sees, so the keymap must come first -- otherwise every
+    pointer key resolves to the wrong integer and reads as an edit nobody made.
+    It also carries SLOW_UP and friends, which exist in no upstream header.
+    """
+    return _defines(os.path.join(ROOT, "config", "eyelash_corne.keymap"),
+                    "pointing.h")
+
+
 def _resolve_pointing(name, expr, seen=()):
-    e = expr.strip()
+    # the keymap writes its values with trailing // comments
+    e = re.split(r"/[/*]", expr, 1)[0].strip()
     while e.startswith("(") and e.endswith(")") and _balanced(e[1:-1]):
         e = e[1:-1].strip()
     m = re.fullmatch(r"BIT\s*\(\s*(\d+)\s*\)", e)
     if m:
         return 1 << int(m.group(1))
+    # MOVE_X/MOVE_Y pack a signed 16-bit delta; &mmv and &msc carry the result.
+    # Without this the source spelling stayed a string and could never equal the
+    # integer the board reports, so all ten pointer keys read as changed.
+    m = re.fullmatch(r"(MOVE_X|MOVE_Y)\s*\((.+)\)", e)
+    if m:
+        inner = _resolve_pointing(name, m.group(2), seen)
+        if inner is None:
+            return None
+        packed = inner & 0xFFFF
+        return (packed << 16) if m.group(1) == "MOVE_X" else packed
+    if e.startswith("-"):
+        v = _resolve_pointing(name, e[1:], seen)
+        return None if v is None else -v
     if re.fullmatch(r"\d+", e):
         return int(e)
     if re.fullmatch(r"[A-Za-z_]\w*", e) and e not in seen:
-        nxt = _defines("pointing.h").get(e)
+        nxt = _pointing_defines().get(e)
         if nxt is not None:
             return _resolve_pointing(e, nxt, seen + (e,))
     return None
@@ -150,6 +209,37 @@ def encode_keycode(text):
         inner = encode_keycode(m.group(2))
         return None if inner is None else (MOD_BITS[MOD_FUNCS[m.group(1)]] << 24) | inner
     return keycodes().get(t)
+
+
+@functools.lru_cache(maxsize=None)
+def encode_alias(name):
+    """A keys.h alias -> the integer the board reports, or None.
+
+    EXCL is defined as LS(N1): it has no HID usage of its own, so
+    encode_keycode() returns None for it. The board reports the modified value
+    and decodes back to "LS(N1)", which could never equal the source spelling
+    "EXCL" -- so that key read as changed on every single read, forever.
+    Follow the #define chain, applying modifier wrappers as they appear.
+    """
+    expr = _raw().get(name)
+    return None if expr is None else _resolve_modded(expr)
+
+
+def _resolve_modded(expr, depth=0):
+    if depth > 8:
+        return None
+    e = expr.strip()
+    while e.startswith("(") and e.endswith(")") and _balanced(e[1:-1]):
+        e = e[1:-1].strip()
+    m = re.fullmatch(r"([A-Z]{2})\s*\((.*)\)", e)
+    if m and m.group(1) in MOD_FUNCS:
+        inner = _resolve_modded(m.group(2), depth + 1)
+        return None if inner is None else (MOD_BITS[MOD_FUNCS[m.group(1)]] << 24) | inner
+    v = _resolve(e)
+    if v is not None:
+        return v
+    nxt = _raw().get(e)
+    return _resolve_modded(nxt, depth + 1) if nxt is not None else None
 
 
 def known_keycode(text):

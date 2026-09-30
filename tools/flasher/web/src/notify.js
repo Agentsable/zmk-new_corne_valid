@@ -27,6 +27,19 @@ function fire(title, body, tag) {
 export function notifyOnChange(prev, next) {
   if (!prev || !next) return;
 
+  // The worker answers phase "offline" when the Mac is unreachable. It matched
+  // nothing here, so a tunnel drop mid-deploy -- the moment the user most needs
+  // telling -- fired nothing at all, and the recovery transition back into
+  // *_wait re-fired the double-tap prompt a second time.
+  const wasLive = !prev.local_down, isDown = Boolean(next.local_down);
+  if (wasLive && isDown) {
+    fire("Flasher disconnected",
+         "The local app stopped answering. A running update cannot be monitored.",
+         "result");
+    return;
+  }
+  if (prev.local_down && !isDown) return;   // recovery is not a new event
+
   if (prev.phase !== next.phase) {
     if (next.phase === "right_wait")
       fire("Right half ready", "Double-tap reset on the RIGHT half to flash it.", "action");

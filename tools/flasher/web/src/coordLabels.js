@@ -11,6 +11,13 @@ const JOY = { up: "JOY↑", down: "JOY↓", left: "JOY←", right: "JOY→", cen
 
 export function coordLabels(layout, rc, keys) {
   if (!layout?.length || !rc?.length) return [];
+  // keys carries the joystick/rotary flags, and those five keys are NAMED
+  // rather than numbered. Without them every remaining key shifts into their
+  // column slots and 27 of the 48 labels silently change meaning -- R10 stops
+  // being "H" and becomes the joystick's down key. A caller with no keys is
+  // asking for labels that cannot be computed, so give it none rather than
+  // wrong ones. /api/keymap returning layers: [] is the live path here.
+  if (!keys?.length || keys.length !== layout.length) return [];
   const xs = layout.map((p) => p[0]);
   const split = (Math.min(...xs) + Math.max(...xs)) / 2;
   const half = (i) => (layout[i][0] < split ? "L" : "R");

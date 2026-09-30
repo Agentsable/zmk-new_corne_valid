@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import MiniBoard from "./MiniBoard.jsx";
+import useFlasherState from "./useFlasherState.js";
+import { startDeploy } from "./start.js";
 
 const LABEL = {
   blank: "not started",
@@ -19,24 +21,31 @@ function Side({ name, status, order, side, geo }) {
 }
 
 export default function Deploy() {
-  const [s, setS] = useState(null);
+  const s = useFlasherState();
   const [name, setName] = useState("");
   const [geo, setGeo] = useState(null);
+  const [err, setErr] = useState("");
+  const [starting, setStarting] = useState(false);
   useEffect(() => {
     // layout plus the joystick/rotary flags, for the per-half diagrams
     fetch("/api/keymap").then((r) => r.json())
       .then((j) => setGeo({ layout: j.layout, keys: j.layers?.[0]?.keys ?? [] }))
       .catch(() => {});
   }, []);
-  useEffect(() => {
-    const tick = async () => { try { setS(await (await fetch("/api/state")).json()); } catch {} };
-    tick();
-    const id = setInterval(tick, 700);
-    return () => clearInterval(id);
-  }, []);
   if (!s) return <div className="page" />;
 
   const running = !["idle", "error", "done"].includes(s.phase);
+  // The worker answers 200 with phase "offline" and both halves "blank" when the
+  // Mac is unreachable. Rendering that as-is prints "not started" under a half
+  // that may be mid-write, so say what is actually known instead.
+  const down = Boolean(s.local_down);
+
+  const send = async () => {
+    setStarting(true); setErr("");
+    const r = await startDeploy(name);
+    setStarting(false);
+    if (!r.ok) setErr(r.error);
+  };
   // request is absent when the hosted app answers 401 (no session) or reports
   // the Mac offline, so this cannot assume it is there.
   const when = s.request?.at
@@ -52,15 +61,20 @@ export default function Deploy() {
           placeholder="Version name, e.g. joystick-tuning" />
         <span className="hint">tags as predeploy_&lt;dd-mm-yy_hh-mm&gt;_&lt;name&gt;</span>
       </div>
-      <button className="request" disabled={running}
-        onClick={() => fetch("/api/start", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name }) })}>
-        <span className="req-when">Update requested {when}</span>
+      <button className="request" disabled={running || starting || down} onClick={send}>
+        <span className="req-when">
+          {starting ? "Starting…" : `Update requested ${when}`}
+        </span>
         <span className="req-desc">{s.request?.description}</span>
       </button>
+      {err && <p className="err">{err}</p>}
 
-      <div className="sides">
+      {down ? (
+        <p className="err">The local flasher is unreachable, so the state of a
+          running update cannot be read. What is shown below is not current.</p>
+      ) : null}
+
+      <div className={"sides" + (down ? " unknown" : "")}>
         <Side name="Left" status={s.left} order="2nd" side="left" geo={geo} />
         <Side name="Right" status={s.right} order="1st" side="right" geo={geo} />
       </div>
