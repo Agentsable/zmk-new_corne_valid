@@ -118,9 +118,30 @@ def diff(source_layers, board_layers, behaviors, rejected=()):
     and the UI stops marking them on the source side.
     """
     rejected = set(rejected)
+    # Pair by NAME where both sides name their layers uniquely. Position pairing
+    # broke the moment a layer moved in Studio -- move_layer is a supported RPC
+    # -- and every key in the moved layers then read as changed, with adopting
+    # one writing the wrong binding into the wrong layer. Names travel with the
+    # layer; array position does not.
+    by_name, dupes = {}, set()
+    for L in source_layers:
+        n = L.get("name")
+        if n in by_name:
+            dupes.add(n)
+        by_name[n] = L
+    board_names = [b.get("name") for b in board_layers]
+    use_names = (not dupes
+                 and len(set(board_names)) == len(board_names)
+                 and all(n in by_name for n in board_names if n))
+
     out = []
+    used = set()
     for i, board in enumerate(board_layers):
-        src = source_layers[i] if i < len(source_layers) else None
+        if use_names and board.get("name") in by_name:
+            src = by_name[board["name"]]
+            used.add(id(src))
+        else:
+            src = source_layers[i] if i < len(source_layers) else None
         # A layer the board has and source does not used to force changed=False
         # for every key, so a layer added in Studio rendered "in sync" -- the
         # exact case this page exists to catch.
@@ -163,6 +184,7 @@ def diff(source_layers, board_layers, behaviors, rejected=()):
             "index": i,
             "source_name": src["name"] if src else None,
             "board_name": board.get("name") or f"Layer {i}",
+            "paired_by": "name" if use_names else "position",
             "keys": keys,
             "changed": sum(1 for k in keys if k["changed"] and not k["rejected"]),
             "unknown": sum(1 for k in keys if k["unknown"]),

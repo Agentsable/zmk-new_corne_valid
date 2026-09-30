@@ -48,3 +48,4 @@ tools/flasher/.remote-secret
 
 # runtime log from connect.sh
 tools/flasher/tunnel.log
+tools/flasher/.deploy.lock
