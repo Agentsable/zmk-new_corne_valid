@@ -1,5 +1,8 @@
-"""Self-check for bootloader detection. Run: python3 test_detect.py"""
-import os
+"""Self-check for bootloader detection and half identity.
+
+Run: python3 test_detect.py
+"""
+import os, subprocess, sys, textwrap
 os.environ.setdefault("NRFUTIL", ""); os.environ.setdefault("PKG_DIR", "")
 import server
 
@@ -27,4 +30,68 @@ def main():
     finally:
         server.volume, server.ports = rv, rp
 
+
+def half_identity():
+    """Both halves are nice_nano_v2 with the same bootloader and the same
+    NICENANO volume. The USB serial is the only thing that differs, so this is
+    the whole of the protection against flashing the wrong one."""
+    real_serial, real_load, real_save = (server.port_serial, server.load_state,
+                                         server.save_state)
+    store = {}
+    try:
+        server.load_state = lambda: dict(store)
+        server.save_state = lambda d: store.update(d)
+        server.port_serial = lambda port: "LEFTSERIAL"
+
+        # nothing learned yet: there is nothing to compare against, so allow
+        assert server.check_half("left", "cu.x") is None
+        assert server.check_half("right", "cu.x") is None
+
+        server.remember_half("left", "cu.x")
+        assert store["half_serials"]["left"] == "LEFTSERIAL"
+
+        # the LEFT half is in DFU and the run wants to flash RIGHT -> refuse
+        why = server.check_half("right", "cu.x")
+        assert why and "left half" in why, why
+        # ... and flashing LEFT is still fine
+        assert server.check_half("left", "cu.x") is None
+
+        # an unreadable serial must not block a flash; it only loses the check
+        server.port_serial = lambda port: ""
+        assert server.check_half("right", "cu.x") is None
+        print("half-identity self-check: 5 passed")
+    finally:
+        server.port_serial, server.load_state, server.save_state = (
+            real_serial, real_load, real_save)
+
+
+def deploy_lock():
+    """The lock has to hold across PROCESSES: STATE is per-process, so the
+    /api/start gate cannot see ./deploy.py and vice versa."""
+    fh = server.acquire_deploy_lock()
+    try:
+        r = subprocess.run(
+            [sys.executable, "-c", textwrap.dedent("""
+                import os
+                os.environ.setdefault("NRFUTIL", ""); os.environ.setdefault("PKG_DIR", "")
+                import server
+                try:
+                    server.acquire_deploy_lock()
+                    raise SystemExit("held lock twice")
+                except server.DeployBusy:
+                    pass
+            """)],
+            capture_output=True, text=True,
+            cwd=os.path.dirname(os.path.abspath(__file__)))
+        assert r.returncode == 0, f"second process was not refused: {r.stdout}{r.stderr}"
+    finally:
+        server.release_deploy_lock(fh)
+    # and the lock is genuinely released
+    fh2 = server.acquire_deploy_lock()
+    server.release_deploy_lock(fh2)
+    print("deploy-lock self-check: 2 passed")
+
+
 main()
+half_identity()
+deploy_lock()

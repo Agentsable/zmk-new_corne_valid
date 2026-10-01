@@ -1,7 +1,8 @@
 # Known issues and where to look next
 
-State as of 2026-09-30, after a three-way bug hunt over the ZMK serial path,
-the layout/coordinate derivation and the flash/deploy machinery.
+State as of 2026-10-01, after a three-way bug hunt over the ZMK serial path,
+the layout/coordinate derivation and the flash/deploy machinery, plus a
+follow-up pass over what that hunt left open.
 
 The pattern worth carrying: every failure this tool has had looked like success.
 A push that deployed nothing printed nothing. An indicator froze on its last
@@ -92,6 +93,22 @@ Grouped by the shape of the failure rather than by file.
 - **Positional parameter shift fixed**: an empty param1 with a populated param2
   promoted param2 into the first slot.
 
+### Fixed in the follow-up pass
+- **A dirty tree is refused, not warned about.** Docker builds the working tree,
+  so anything dirty outside the keymap shipped untagged. Checked before the
+  build, since Docker has consumed the tree by then; `workflow(allow_dirty=True)`
+  is the deliberate override. (From a concurrent session -- see Open 3.)
+- **`deploy.py` and the web app exclude each other.** `STATE` is per-process, so
+  the `/api/start` gate could not see a terminal run. An `flock` on
+  `.deploy.lock` covers both entry points; verified a second process is refused
+  and acquires cleanly after release.
+- **Layers pair by name, not array position.** `move_layer` is a supported
+  Studio RPC, and after a reorder every key in the moved layers read as changed,
+  with adopting one writing the wrong binding into the wrong layer. Falls back
+  to position when names are not unique, and reports which was used.
+- **The wrong half in DFU is refused** once both serials are known -- see Open 2
+  for what that does not cover.
+
 ### Other
 - Four independent `/api/state` pollers became one shared subscriber
   (`flasherState.js`); a single tab went from ~2.6 req/s to ~1.05.
@@ -105,36 +122,38 @@ Grouped by the shape of the failure rather than by file.
 
 ## Open
 
-### ~~1. The predeploy tag still does not fully identify the firmware~~ FIXED
-The run now **refuses** rather than warning. `dirty_outside_keymap()` is checked
-before the build, not after -- Docker has already consumed the working tree by
-then -- and `workflow(name, allow_dirty=True)` is the deliberate override.
-
-Parsing this needed `--porcelain -z` read straight from stdout: `git()` strips
-its combined output, which eats the leading space of the *first* porcelain line
-only. Fixed-width slicing then shifts that one path by a character, and had the
-keymap been first it would have stopped matching and the gate would have blocked
-the one change the workflow commits itself.
-
-### 2. Nothing checks *which* half is in DFU
-`flash_half` waits for any NICENANO mount and writes that side's package. Both
-halves are `nice_nano_v2` with identical bootloaders, so double-tapping the
-wrong one programmes the wrong firmware, prints `Device programmed.` and marks
-the step green. Not detectable from this side.
-
-### ~~3. `deploy.py` has no cross-process guard~~ ALREADY FIXED
-`acquire_deploy_lock()` takes `fcntl.flock(LOCK_EX|LOCK_NB)` on
-`.deploy.lock` and `workflow()` holds it for the whole run. Exclusive across
-processes and released if the holder dies. This entry was stale.
-
-### 4. Layer identity is positional
-`keymap_pb2.Layer` carries an `id` that `server.py` drops, so source and board
-are paired by array position. `move_layer` in Studio would produce a phantom
-diff across every moved layer.
-
-### 5. Orphan predeploy tags accumulate
+### 1. Orphan predeploy tags are visible but not pruned
 Nothing deletes a tag. A failed run leaves `predeploy_*` on origin with no
-`deployed_*`, and each retry mints a new timestamp.
+`deployed_*`, and each retry mints a new timestamp. `orphan_predeploy_tags()`
+counts them, a run logs the oldest with the prune command, and `/api/state`
+carries the list -- so they can no longer accumulate unnoticed, but removing
+them is still manual:
+
+    git tag -d <tag> && git push origin :refs/tags/<tag>
+
+### 2. The first sighting of each half is taken on trust
+`check_half()` refuses to flash when the serial in the bootloader is the one
+recorded for the *other* half, but nothing in the hardware says "I am the left
+half". Until both have been flashed once there is nothing to compare against,
+and a wrong double-tap on that very first run records the wrong association.
+
+**This path has never run against a real bootloader.** The logic is unit-tested;
+the serial was read from the board in application mode. A bootloader may present
+a different USB descriptor, and if its serial differs from the application-mode
+one that is still self-consistent (we only ever learn and compare bootloader
+serials) -- but it is unverified. Check it on the next real flash.
+
+### 3. Several Claude sessions share this working tree
+Found on 2026-09-30: another session running with `--dangerously-skip-permissions`
+committed while this one was mid-edit. It staged everything, so it swept up
+unrelated in-progress work and shipped it under a message describing only its
+own change -- a commit that does not describe its contents, which is the exact
+failure this file opens by warning about. It also produced two contradictory
+dirty-tree gates in `_workflow`, from two directions, within a minute.
+
+Before editing, check `git log --oneline -3` and `git status`. If another agent
+is active, give it a worktree or stop it. A shared tree with two autonomous
+writers has no safe merge story.
 
 ## Operational gaps (not defects)
 
@@ -168,7 +187,7 @@ Nothing deletes a tag. A failed run leaves `predeploy_*` on origin with no
 ## How to hunt
 
     cd tools/flasher
-    python3 test_detect.py        # bootloader detection
+    python3 test_detect.py        # bootloader detection, half identity, deploy lock
     python3 test_bindings.py      # binding validation, both paths + all 192 keys
     python3 zmk_diff.py           # diff, mutation, rejection
     python3 -c "import verify,os;print(verify.run(os.path.abspath('../..')))"
