@@ -959,9 +959,22 @@ class H(BaseHTTPRequestHandler):
                     if not binding:
                         return self._send(400, {"error": "adopt needs the binding text"})
                     src = keymap_mod.parse(open(KEYMAP).read(), REPO)
-                    if layer >= len(src["layers"]):
-                        return self._send(400, {"error": f"no layer {layer} in source"})
-                    name = src["layers"][layer]["name"]
+                    # The key's layer field is the BOARD's index. diff() pairs
+                    # source to board by name, so once a layer moves in Studio
+                    # that index no longer addresses the source array -- adopting
+                    # wrote the right binding into the wrong layer, silently.
+                    # The client sends the paired source name; refuse without it
+                    # rather than fall back to a positional guess.
+                    names = [L["name"] for L in src["layers"]]
+                    name = body.get("source_name")
+                    if not name:
+                        return self._send(400, {"error":
+                            "stale page: reload it (the adopt request carried no "
+                            "source layer name, so the target layer is ambiguous)"})
+                    if name not in names:
+                        return self._send(400, {"error":
+                            f"source has no layer named {name!r} (have: "
+                            + ", ".join(names) + ")"})
                     try:
                         text = keymap_mod.set_bindings(
                             open(KEYMAP).read(),

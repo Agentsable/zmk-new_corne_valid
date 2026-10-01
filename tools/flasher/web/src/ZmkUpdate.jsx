@@ -93,7 +93,8 @@ export default function ZmkUpdate() {
       const r = await fetch("/api/zmk/decide", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: sel.key, adopt, binding: sel.k.board }),
+        body: JSON.stringify({ key: sel.key, adopt, binding: sel.k.board,
+                               source_name: sel.sourceName }),
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) { setErr(j.error ? j : { kind: "failed", error: `Adopt failed (${r.status}).` }); return; }
@@ -162,7 +163,8 @@ export default function ZmkUpdate() {
 
       {layers?.map((l) => (
         <LayerPair key={l.index} layer={l} picked={sel?.key}
-          onPick={(k) => setSel({ key: `${l.index}/${k.index}`, k })} />
+          onPick={(k) => setSel({ key: `${l.index}/${k.index}`, k,
+            sourceName: l.source_name })} />
       ))}
     </div>
   );

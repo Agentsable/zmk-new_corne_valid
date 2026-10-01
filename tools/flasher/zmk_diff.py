@@ -274,4 +274,20 @@ if __name__ == "__main__":
     # and that rejecting it clears the outstanding count
     d3 = diff(layers, board, beh, rejected={"0/1"})
     assert sum(x["changed"] for x in d3) == 0, "rejected keys must not stay outstanding"
+    # A moved layer must stay addressable. diff() pairs by name, so the layer
+    # field of the emitted key is the BOARD's index -- resolving it against the
+    # source array wrote the right binding into the wrong layer. The adopt path
+    # must use source_name, and this asserts the two actually diverge so the
+    # test cannot pass vacuously.
+    moved = [board[1], board[0]] + board[2:]
+    dm = diff(layers, moved, beh)
+    assert dm[0]["paired_by"] == "name", dm[0]["paired_by"]
+    assert dm[0]["source_name"] == layers[1]["name"], dm[0]["source_name"]
+    assert dm[0]["source_name"] != layers[0]["name"], (
+        "board index 0 must no longer address source layer 0, or this case "
+        "proves nothing")
+    for L in dm:
+        assert L["source_name"] == L["board_name"], (L["source_name"], L["board_name"])
+    print("moved layers pair by name, and board index no longer addresses source")
+
     print("diff, mutation and rejection all behave")
