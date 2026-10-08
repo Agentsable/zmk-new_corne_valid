@@ -2,9 +2,17 @@
 
 Run: python3 test_detect.py
 """
-import os, subprocess, sys, textwrap
-os.environ.setdefault("NRFUTIL", ""); os.environ.setdefault("PKG_DIR", "")
+import os, subprocess, sys, tempfile, textwrap
 import server
+
+# flash_half() logs, and server.log() appends to the real audit.log -- the
+# durable record of what was actually flashed. A self-check writing fake
+# "left: refusing" lines in there is indistinguishable from the real thing.
+server.AUDIT_LOG = os.path.join(tempfile.gettempdir(), "flasher_selfcheck_audit.log")
+# Nothing in here may shell out to a real DFU tool against a real port. This
+# used to be os.environ["NRFUTIL"]="", which stopped working once server.py
+# started falling back to .venv/bin/adafruit-nrfutil when the env var is unset.
+server.NRFUTIL = ""
 
 def main():
     rv, rp = server.volume, server.ports
@@ -92,6 +100,44 @@ def deploy_lock():
     print("deploy-lock self-check: 2 passed")
 
 
+def retry_rewait():
+    """flash_half used to give up when a failed write left the board out of DFU,
+    stranding one half on old firmware. It now waits for another double-tap --
+    and that second wait must police half identity too, or the retry path
+    becomes the one way to flash the wrong half and call it success."""
+    real = (server.volume, server.ports, server.port_serial, server.load_state,
+            server.flash, server.wait_for, server.remember_half)
+    try:
+        # volume mounted but no fresh port, so bootloader_port() inside the
+        # retry loop returns None -- the "bootloader went away" case.
+        server.volume = lambda: "NICENANO"
+        server.ports = lambda: []
+        server.wait_for = lambda fn, t: "cu.usbmodem1401"
+        server.load_state = lambda: {"half_serials": {"right": "RIGHTSERIAL"}}
+        server.remember_half = lambda side, port: None
+        flashed = []
+        server.flash = lambda side, port: flashed.append(port) or False
+
+        # The LEFT half passes the first check, its write fails, and the board
+        # that comes back for the retry is the RIGHT one -> refuse, do not flash.
+        serials = iter(["LEFTSERIAL", "RIGHTSERIAL"])
+        server.port_serial = lambda port: next(serials, "RIGHTSERIAL")
+        assert server.flash_half("left") is False
+        assert len(flashed) == 1, f"flashed after refusing: {flashed}"
+        assert "right half" in server.STATE["error"], server.STATE["error"]
+
+        # Same shape, but the LEFT half comes back -> the retry proceeds.
+        flashed.clear()
+        server.port_serial = lambda port: "LEFTSERIAL"
+        assert server.flash_half("left") is False      # flash() never succeeds here
+        assert len(flashed) > 1, "retry never happened after the re-wait"
+        print("retry-rewait self-check: 3 passed")
+    finally:
+        (server.volume, server.ports, server.port_serial, server.load_state,
+         server.flash, server.wait_for, server.remember_half) = real
+
+
 main()
 half_identity()
 deploy_lock()
+retry_rewait()

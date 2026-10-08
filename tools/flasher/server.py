@@ -31,8 +31,12 @@ def current_build():
     except (OSError, StopIteration):
         return ""
 PORT = int(os.environ.get("FLASHER_PORT", "8787"))
-NRFUTIL = os.environ.get("NRFUTIL", "")
-PKG_DIR = os.environ.get("PKG_DIR", "")
+# run.sh exports both of these; `./deploy.py name` straight from a shell does
+# not, and the miss surfaced as "firmware build failed" with both halves already
+# compiled -- the build was fine, only the packaging step had no nrfutil. Fall
+# back to the layout run.sh creates so either entry point works alone.
+NRFUTIL = os.environ.get("NRFUTIL") or os.path.join(ROOT, ".venv", "bin", "adafruit-nrfutil")
+PKG_DIR = os.environ.get("PKG_DIR") or os.path.join(ROOT, "pkg")
 
 PKG = {"left": "left_nice.zip", "right": "right_nice.zip"}
 HEX = {"left": "build/left_nice/zephyr/zmk.hex", "right": "build/right_nice/zephyr/zmk.hex"}
@@ -508,9 +512,29 @@ def flash_half(side):
             # baseline, not [] -- with an empty baseline every cu.usbmodem* is
             # "fresh" and sorted()[0] wins, which can point nrfutil at a board
             # that is running its firmware and kill it mid-write.
+            # A failed write can leave the board out of DFU. Giving up here
+            # cost a deploy: the first attempt died on the CDC race, the
+            # bootloader was gone 2s later, and the half kept its old firmware
+            # while the other half had the new one. Ask for another double-tap
+            # instead of failing the run.
             again = bootloader_port(baseline)
             if not again:
-                log(f"{side}: bootloader went away before the retry")
+                log(f"{side}: bootloader went away -- double-tap reset again")
+                again = wait_for(lambda: bootloader_port(baseline), WAIT_TIMEOUT)
+                if again:
+                    # Re-prompting means a human taps a board again, so the
+                    # wrong half can show up here just as it can on the first
+                    # wait. Without this the retry path would flash the other
+                    # half and report success -- the exact hole check_half
+                    # exists to close.
+                    wrong = check_half(side, again)
+                    if wrong:
+                        log(f"{side}: refusing -- {wrong}")
+                        setk(**{side: "red"}, phase="error",
+                             error=f"Wrong half in the bootloader: {wrong}.")
+                        return False
+            if not again:
+                log(f"{side}: no bootloader came back")
                 break
             port = again
             log(f"{side}: retry {attempt} on /dev/{port}")
