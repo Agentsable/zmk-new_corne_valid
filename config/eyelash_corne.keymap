@@ -27,6 +27,8 @@
             bindings = <&kp LEFT_SHIFT>, <&kp CAPS>;
         };
 
+        // ponytail: kept but unbound -- left encoder is inert now;
+        // put &rsr_scrl back in sensor-bindings to restore scrolling.
         rsr_scrl: rsr_scrl {
             compatible = "zmk,behavior-runtime-sensor-rotate";
             #sensor-binding-cells = <0>;
@@ -73,7 +75,7 @@
   &kp LCTRL        &kp BSPC         &kp DEL          &kp RET          &lt 2 SPACE      &mo 3
             >;
 
-            sensor-bindings = <&rsr_scrl &rsr_trans>;
+            sensor-bindings = <&rsr_trans &rsr_trans>;
         };
 
         layer_1 {
@@ -85,7 +87,7 @@
   &kp LG(SPACE)      &kp RSHFT          &kp LALT           &kp RSHFT          &kp TAB            &trans
             >;
 
-            sensor-bindings = <&rsr_scrl &rsr_trans>;
+            sensor-bindings = <&rsr_trans &rsr_trans>;
         };
 
         layer_2 {
@@ -97,7 +99,7 @@
   &trans         &kp BSPC       &kp DEL        &kp RET        &trans         &trans
             >;
 
-            sensor-bindings = <&rsr_scrl &rsr_trans>;
+            sensor-bindings = <&rsr_trans &rsr_trans>;
         };
 
         layer_3 {
@@ -109,7 +111,7 @@
   &trans           &trans           &trans           &kp RET          &trans           &trans
             >;
 
-            sensor-bindings = <&rsr_scrl &rsr_trans>;
+            sensor-bindings = <&rsr_trans &rsr_trans>;
         };
     };
 };
