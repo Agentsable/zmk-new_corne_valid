@@ -1,8 +1,8 @@
 # Known issues and where to look next
 
-State as of 2026-10-01, after a three-way bug hunt over the ZMK serial path,
-the layout/coordinate derivation and the flash/deploy machinery, plus a
-follow-up pass over what that hunt left open.
+State as of 2026-10-08, after a three-way bug hunt over the ZMK serial path,
+the layout/coordinate derivation and the flash/deploy machinery, a follow-up
+pass over what that hunt left open, and two bugs a real deploy walked into.
 
 The pattern worth carrying: every failure this tool has had looked like success.
 A push that deployed nothing printed nothing. An indicator froze on its last
@@ -109,6 +109,35 @@ Grouped by the shape of the failure rather than by file.
 - **The wrong half in DFU is refused** once both serials are known -- see Open 2
   for what that does not cover.
 
+### Fixed 2026-10-08, found by an actual deploy
+Both were hit flashing one keymap change, which is the point: neither showed up
+in any amount of reading.
+- **`deploy.py` could not package firmware unless launched via `run.sh`.**
+  `NRFUTIL` and `PKG_DIR` came only from that script's exports, so
+  `./deploy.py "name"` from a shell reported "firmware build failed" with both
+  halves already compiled and packaged -- the build was fine; packaging had no
+  nrfutil. The message named the wrong step, which is what made it confusing
+  rather than obvious. Both now fall back to the layout `run.sh` creates, so
+  either entry point works alone.
+- **A lost bootloader on retry stranded one half on old firmware.** The first
+  write to the left half died on the known CDC race (`[Errno 6] Device not
+  configured`); 2s later the bootloader was gone, `flash_half` logged
+  "bootloader went away before the retry" and failed the run -- with the right
+  half already carrying the new firmware. Mismatched halves, and the only way
+  out was a full re-run. It now waits for another double-tap instead.
+  **And that second wait re-runs `check_half`:** re-prompting means a human taps
+  a board again, so without it the retry path became the single route by which
+  the wrong half gets flashed and the step still goes green. `test_detect.py`
+  covers both branches.
+- **The self-check was writing fake flash events into `audit.log`.**
+  `retry_rewait()` drives the real `flash_half`, which logs, so running the
+  tests left synthetic `left: refusing` and `retry 1 on /dev/cu.usbmodem1401`
+  lines in the durable record of what was actually flashed -- indistinguishable
+  from the real thing, in the one file kept precisely because `STATE["log"]`
+  dies with the process. The test now redirects `AUDIT_LOG` to a temp path. The
+  older `half_identity()` had been doing the same with `learned serial
+  LEFTSERIAL` since at least 2026-10-01.
+
 ### Other
 - Four independent `/api/state` pollers became one shared subscriber
   (`flasherState.js`); a single tab went from ~2.6 req/s to ~1.05.
@@ -166,6 +195,16 @@ writers has no safe merge story.
 - **The Basic auth password has been printed into a session transcript.**
   Rotating is a minute: regenerate, `wrangler secret put`, rewrite
   `.remote-secret`, restart.
+- **Encoder changes cannot be verified from the board.** The Studio keymap RPC
+  carries `Layer{id, name, bindings}` and nothing else -- `bindings` is key
+  positions only, with no `sensor-bindings` field anywhere in `keymap_pb2`. So
+  the read/diff path, which is the whole premise of this tool, is blind to the
+  one knob on the keyboard: an encoder edit can be flashed and then only
+  confirmed by turning it, or by reading `sensor-bindings` out of
+  `build/<side>_nice/zephyr/zephyr.dts` for the build that produced the
+  package. A referenced behaviour gets a `phandle` line there and an
+  unreferenced one does not, which is the positive check that an old binding is
+  really detached.
 
 ## Verified correct, do not re-investigate
 
